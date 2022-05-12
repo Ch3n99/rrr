@@ -1,0 +1,71 @@
+{ Script d'esempio creato il 03/11/2011}
+
+//Importazione librerie necessarie
+{$I ..\..\libs\standard\stdLib.lib}
+
+function CreateDocReport(db:TDatabase;codiceagente,numerodoc,datadoc,provenienza,outFileName:string):boolean;
+var
+  title,author,subject:string;
+begin
+   ReportBuilder_New();
+  //ReportBuilder_SetReportBuilderPath('ReportBuilder\');
+  //ReportBuilder_SetCallDll(false);
+
+  ReportBuilder_SetTemplateFileName('Reports\Templates\inventario.fr3');
+  ReportBuilder_SetTranslateFileName('Reports\Translations\inventario_it.lng');
+  ReportBuilder_SetDatabaseFromDB(db);
+
+  // info documento
+  title:=Format('Documento agente "%s"',[codiceagente]);
+  author:='nxt';
+  subject:=Format('Proposta d''ordine n. %s del %s',[numerodoc,datadoc]);
+  ReportBuilder_SetDocInfo(title,author,subject);
+
+  // opzioni export
+  ReportBuilder_SetJPEGQuality(10);
+  ReportBuilder_SetResolution(1000);
+  ReportBuilder_SetMonochrome(false);
+  ReportBuilder_SetCropImages(false);
+  ReportBuilder_SetNoMultiPage(true);
+  ReportBuilder_SetNoSeparateFiles(false);
+  ReportBuilder_SetNavigator(true);
+  ReportBuilder_SetAbsLinks(false);
+
+  // variabili
+  ReportBuilder_AddStringVar('numerodoc',numerodoc);
+  ReportBuilder_AddStringVar('provenienza',provenienza);
+  ReportBuilder_AddStringVar('datadoc',datadoc);
+  ReportBuilder_AddStringVar('codiceagente',codiceagente);
+  ReportBuilder_AddStringVar('showgiacenzastock','1');
+
+
+  ReportBuilder_SetLogFileName('reportBuilder.log');
+  ReportBuilder_SetOutFileName(outFileName);
+
+  result:=ReportBuilder_DoProcess(true); //true=design mode
+
+  ReportBuilder_Free();
+end;
+
+var
+  codiceagente,numerodoc,datadoc,provenienza,outFileName:string;
+  db:TDatabase;
+begin
+  codiceagente:='000';
+  numerodoc:='8';
+  datadoc:='20151111';
+  provenienza:='0';
+
+  db:=TDatabase.create(nil);
+  db.connectionString:=GetDefaultConnectionString();
+
+  outFileName:='test.pdf';
+
+  if CreateDocReport(db,codiceagente,numerodoc,datadoc,provenienza,outFileName) then
+    showmessage('ok')
+  else
+    showmessage('non ok');
+
+  if db<>nil then
+    db.free;
+end.
