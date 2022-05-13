@@ -1,0 +1,16 @@
+:NATIVEEXPORT
+T;14;DataVisita;index;key
+T;8;CodiceCliente;index
+T;4;CodiceDestinazione;index
+T;2;CodiceEsito
+T;50;Esito
+LT;512;Nota
+T;2;CodiceEsitoLiv2
+T;50;EsitoLiv2
+T;100;CustomParam1
+T;100;CustomParam2
+T;14;DataVisitaEffettiva
+N8;4;ImageIndex
+T;1;CodiceInvio
+N8;4;FlagGenerico
+

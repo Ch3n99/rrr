@@ -1,0 +1,6 @@
+:NATIVEEXPORT
+T;6;CodiceCliente;Index;Key
+T;10;CodiceFattura;Index;Key
+T;50;DescrizioneFattura
+T;12;ImportoFattura
+N2;4;AnnoFattura;Index;Key

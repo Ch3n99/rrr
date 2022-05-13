@@ -1,0 +1,8 @@
+:NATIVEEXPORT
+
+T;4;OrganizzazioneCommerciale;index;key
+T;3;Linea;index;key
+T;16;IdSchedaOrigine;index;key
+T;16;IdSchedaCliente
+T;1;Modalita
+T;4;MinQta

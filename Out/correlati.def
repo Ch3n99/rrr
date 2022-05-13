@@ -1,0 +1,12 @@
+:SEPARATOR=;
+
+T;;Linea;index;key
+T;;Modello;index;key
+T;;ModelloAssociato;index;key
+T;;Modello
+T;;ModelloAssociato
+T;;Col
+T;;ColAssociato
+T;;Row
+T;;RowAssociato
+T;;Ordinamento

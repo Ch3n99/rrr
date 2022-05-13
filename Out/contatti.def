@@ -1,0 +1,16 @@
+:SEPARATOR=;
+
+T;;CodiceCliente;index;key
+T;;CodiceSpedizione;index;key
+T;;Cognome;index;key
+T;;Nome;index;key
+T;;Funzione
+T;;TelefonoCentralino
+T;;TelefonoUfficio
+T;;Fax
+T;;Cellulare
+T;;IndirizzoEmail
+T;;Nota
+T;;Ricevimento
+T;1;Deleted
+T;;IdContatto;index;key

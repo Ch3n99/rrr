@@ -1,0 +1,7 @@
+:NATIVEEXPORT
+:SEPARATOR=;
+
+T;;CodiceMagazzino;index;key
+T;;CodiceArticolo;index;key
+T;;Carico1
+

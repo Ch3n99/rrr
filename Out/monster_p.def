@@ -1,0 +1,5 @@
+:NATIVEEXPORT
+T;10;CodiceCliente;Index;Key
+T;15;Mese;Index;Key
+T;12;Linea;Index;Key
+N8;11;Qta

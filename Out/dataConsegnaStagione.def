@@ -1,0 +1,6 @@
+:NATIVEEXPORT
+T;3;Stagione;Index;Key
+T;3;Linea;Index;Key
+T;8;DataConsegnaMinimaSole
+T;8;DataConsegnaMinimaVista
+T;1;FlagUltima

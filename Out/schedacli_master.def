@@ -1,0 +1,12 @@
+:NATIVEEXPORT
+T;16;IdSchedaCliente;index;key
+T;16;LngIsoCode;index;key
+T;16;Linea
+T;8;DataInizioValidita;index;key
+T;8;DataFineValidita
+T;255;Descrizione
+T;16;RequestPattern
+T;16;ConfigPattern
+T;16;IdSchedaClientePadre
+T;16;CustomPattern
+T;255;OrgComDocuSign

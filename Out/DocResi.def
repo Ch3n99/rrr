@@ -1,0 +1,15 @@
+:NATIVEEXPORT
+T;30;CodiceReso;Index;Key
+T;10;CodiceCliente
+T;10;CodiceSpedizione
+N8;4;NumeroDoc
+T;8;DataDoc
+T;2;Provenienza
+T;3;Linea;Index;Key
+LT;255;NotaReso
+N8;4;PezziResi
+N8;4;Budget
+N8;4;BudgetResiduo
+N8;4;PercentualeAutorizzata
+N8;4;MaxPezziDaRendere
+N8;1;Exported

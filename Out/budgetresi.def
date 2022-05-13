@@ -1,0 +1,6 @@
+:NATIVEEXPORT
+N8;5;Budget
+T;8;DataInizio;Index;key
+T;8;DataFine
+N8;3;PercentualeAutorizzata
+T;3;Linea;Index;key

@@ -1,0 +1,13 @@
+:SEPARATOR=;
+
+T;128;OrgComm;Index;Key
+T;128;CodicePromozione;Index;Key
+T;128;GerarchiaProdotti;Index;Key
+T;128;FlagVista;Index;Key
+T;128;NPzOrdine
+T;128;UnitaMisura
+T;128;NPzResoMax
+T;128;PercPzResoMax
+T;128;FlagNettoReso
+T;128;PercSconto
+T;128;NPzOmaggioMax

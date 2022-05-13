@@ -1,0 +1,9 @@
+:NATIVEEXPORT
+
+T;10;CodiceCliente;Index;Key
+T;15;Mese;Index;Key
+N8;11;GrossSales
+N8;11;ReturnSales
+N8;11;Misc
+N8;11;Total
+N8;11;RtPercSales

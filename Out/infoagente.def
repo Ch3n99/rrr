@@ -1,0 +1,5 @@
+:NATIVEEXPORT
+:SEPARATOR=;
+
+T;16;InfoKey;index;key
+T;32;InfoVal

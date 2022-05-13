@@ -1,0 +1,9 @@
+:NATIVEEXPORT
+
+T;16;IdSchedaCliente;index;key
+T;16;IdRegola;index;key
+T;2;LngIsoCode;index;key
+T;16;ScoreMinPercent
+T;16;ScoreMaxPercent
+T;2;FlagEffetto
+T;512;Messaggio

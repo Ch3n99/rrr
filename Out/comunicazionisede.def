@@ -1,0 +1,17 @@
+:SEPARATOR=;
+:NATIVEEXPORT
+
+T;;Id;index;key
+T;;Titolo
+T;;Descrizione
+T;;ValidaDa
+T;;ValidaA
+T;;TipoContenuto
+T;;URLContenuto
+T;;TimestampIns
+T;;UtenteCreazione
+T;;NomeUtenteCreazione
+T;;Icona
+T;;Stato;DestAlias=DaLeggere
+T;;Filter1
+T;;Filter2

@@ -1,0 +1,7 @@
+:NATIVEEXPORT
+T;1;Marker1
+N;8;NumeroDoc;Index;Key;Align=right;pad='0'
+T;8;DataDoc;Index;Key
+T;2;Provenienza;Index;Key
+T;255;NotaOrdine
+N1;2;IndiceNota;Index;Key

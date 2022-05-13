@@ -1,0 +1,11 @@
+:NATIVEEXPORT
+T;16;IdSchedaCliente;index;key
+T;16;LngIsoCode;index;key
+T;16;IdDomanda;index;key
+T;255;TestoDomanda
+T;255;TestoSezione
+T;16;TipoDomanda
+T;16;Obbligatoria
+T;64;Ordinamento
+T;512;Nota
+T;1;FlagConteggioPeso

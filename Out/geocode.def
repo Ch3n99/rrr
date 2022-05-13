@@ -1,0 +1,8 @@
+:NATIVEEXPORT
+T;16;CodiceCliente;index;key
+T;16;CodiceSpedizione;index;key
+T;50;Latitudine
+T;50;Longitudine
+T;14;Timestamp_geocode
+T;1;Stato
+T;1;Origine

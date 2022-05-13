@@ -1,0 +1,10 @@
+:NATIVEEXPORT
+T;10;CodiceFattura;Index;Key
+T;6;CodiceCliente;Index;Key
+T;8;DataScadenza;Index;Key
+T;12;Importo
+T;8;DataUltimoIncasso
+T;1;IncassoFlag
+T;4;AnnoFattura;Index;Key
+T;4;CodicePagamento
+T;50;Nota

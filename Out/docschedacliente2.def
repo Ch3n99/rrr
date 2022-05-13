@@ -1,0 +1,13 @@
+T;20;IdSchedaCliente;Index;Key
+T;10;LngIsoCode
+T;20;Linea
+T;11;IdDomanda;Index;Key
+T;10;CodiceAgente
+T;2;Provenienza
+T;10;CodiceCliente;Index;Key
+T;10;CodiceSpedizione;Index;Key
+T;20;IdValore;Index;Key
+T;100;Valore
+T;2;Peso
+T;8;DataCreazione;Index
+T;1;Exported

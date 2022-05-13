@@ -1,0 +1,5 @@
+:NATIVEEXPORT
+T;16;IdSchedaCliente;index;key
+T;2;LngIsoCode;index;key
+T;16;OrgCom;index;key
+T;255;FileName

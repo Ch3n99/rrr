@@ -1,0 +1,17 @@
+:NATIVEEXPORT
+T;16;IdSchedaCliente;index;key
+T;8;LngIsoCode;index;key
+T;16;IdDomanda;index;key
+T;16;IdValore;index;key
+T;255;Valore
+T;16;Peso
+T;255;IdDomandaSuccessiva
+T;64;Ordinamento
+T;1;FlagRispostaBloccante
+T;255;CustomParam1
+T;255;CustomParam2
+T;255;CustomParam3
+T;255;CustomParam4
+T;255;CustomParam5
+T;1;FlagRispostaAutocompilata
+T;255;QueryAutocompilazione

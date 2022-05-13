@@ -1,0 +1,11 @@
+:NATIVEIMPORT
+:RECREATE
+
+T;4;OrganizzazioneCommerciale;Index
+T;10;CodiceCliente;Index
+T;8;DataRegistrazione
+T;3;NumeroNota;Index
+T;12;UtenteSap
+T;26;NomeContattoCliente
+T;255;Nota
+

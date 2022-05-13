@@ -1,0 +1,13 @@
+:NATIVEEXPORT
+T;8;DataAnalisi
+T;4;OrgComm;index;key
+T;3;CodiceAgente;index;key
+T;10;CodiceCliente;index;key
+T;10;CodiceDestinazione;index;key
+T;3;Brand;index;key
+T;10;Ordinato
+T;10;Resi
+T;10;Revoche
+T;10;Netto
+T;10;SogliaPrec
+T;10;SogliaSucc
