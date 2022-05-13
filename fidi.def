@@ -1,0 +1,13 @@
+:NATIVEIMPORT
+:RECREATE
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;10;CodiceCliente;Index;Key
+T;5;Divisa
+T;15;LimiteFido
+T;19;DocumentiCommerciali
+T;15;DocumentiFinanziari
+T;19;TotaleEsposizione
+T;19;Proroghe
+T;1;PartiteDatate
+T;19;ValorePartiteDatate

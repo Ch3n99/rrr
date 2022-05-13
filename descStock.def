@@ -1,0 +1,5 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;2;FlagColore;Index;Key
+T;255;Descrizione

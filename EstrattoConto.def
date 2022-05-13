@@ -1,0 +1,17 @@
+:NATIVEIMPORT
+:RECREATE
+
+T;12;DataElaborazione
+T;4;OrganizzazioneCommerciale;Index
+T;10;CodiceCliente;Index
+T;2;GruppoPartite
+T;2;TipoDoc
+T;3;DescTipoDoc
+T;10;NumeroDoc
+T;8;DataDoc
+T;12;ImportoDoc
+T;8;DataScadenza
+T;12;ImportoAcconto
+T;3;Divisa
+T;12;ImportoDaPagare
+

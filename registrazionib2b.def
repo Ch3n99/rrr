@@ -1,0 +1,10 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;6;CodiceCliente;Index;Key
+T;4;CodiceSpedizione;Index;Key
+T;11;PartitaIva
+T;10;NumConsegna;Index;Key
+T;8;DataConsegna
+T;16;Telefono
+T;14;Cnpj

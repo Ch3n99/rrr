@@ -1,0 +1,10 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;10;NumDocSAPConsegna;Key;Index
+T;10;NumDDT;Index
+T;8;DataDDT
+T;35;NomeSpedizioniere
+T;10;GruppoSpedizioniere
+T;255;Tracking
+T;8;DataEstrazione

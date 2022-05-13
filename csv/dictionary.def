@@ -1,0 +1,8 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;30;NomeCampo;Index;Key
+T;2;Lingua;Index;Key
+T;10;Value;Index;Key
+T;60;Descr
+T;1;FineRecord

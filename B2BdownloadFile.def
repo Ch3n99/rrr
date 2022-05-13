@@ -1,0 +1,7 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;250;Categoria;Index;Key
+T;250;DesFile;Index;Key
+T;250;PathFile;Index;Key
+T;250;LogoDes;Index;Key

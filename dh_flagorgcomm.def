@@ -1,0 +1,12 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;4;OrganizzazioneCommerciale;Key;Index
+T;1;FlagDHAbilitaDH
+T;1;FlagDHAbilitaB2B
+T;1;FlagDHAbilitaMagazine
+T;1;FlagDHAbilitaMultimedia
+T;1;FlagDHAbilitaLMS
+T;1;FlagDHGestioneUtenti
+T;1;FlagDHAccediComeDestinazione
+T;1;FlagDHContatti

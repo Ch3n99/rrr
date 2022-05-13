@@ -1,0 +1,6 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;4;OrganizzazioneCommerciale;Key;Index
+T;10;CodiceCliente;Key;Index
+T;10;Vuoto

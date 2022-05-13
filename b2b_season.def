@@ -1,0 +1,9 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+:POSTSQL=DELETE FROM :CurrentTable: WHERE Stagione = "Stagione" 
+
+T;20;Stagione;Key;Index
+T;255;Descrizione
+T;10;DataInizio
+T;10;DataFine
+T;10;Brand;Key;Index

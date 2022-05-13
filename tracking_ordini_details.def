@@ -1,0 +1,17 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;10;NumOrdine;Key;Index
+T;6;Posizione;Key;Index
+T;18;Matnr
+T;8;Calibro
+T;8;Colore
+T;6;QuantitaOrd
+T;6;QuantitaAnnullata
+T;6;QuantitaEvasa
+T;6;QuantitaAperta
+T;1;TipoPosizione
+T;3;GrAddVendite
+T;11;PrezzoNettoSKU
+T;3;Brand
+

@@ -1,0 +1,11 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;4;OrganizzazioneCommerciale;Key;Index
+T;3;Linea;Key;Index
+T;11;qtaMax
+T;11;qtaMin
+T;11;qtaMaxOrdine
+T;11;qtaMaxGiorno
+T;11;qtaMaxSKUOrdine
+T;11;qtaMaxSKUGiorno

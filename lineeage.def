@@ -1,0 +1,8 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Key;Index
+T;6;Zona;Key;Index
+T;4;Settore;Key;Index
+T;3;CodiceLinea;Key;Index
+T;3;CodiceAgente;Key;Index
+T;1;FineRecord;DestLen=0

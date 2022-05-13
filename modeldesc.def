@@ -1,0 +1,10 @@
+:NATIVEIMPORT
+:RECREATE
+
+T;18;Modello;Index;Key
+T;2;Lingua;Index;Key
+T;40;Descr
+T;20;ModelName
+LT;500;MarketingModelDesc
+T;2;Origin
+

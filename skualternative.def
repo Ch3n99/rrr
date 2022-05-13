@@ -1,0 +1,9 @@
+:NATIVEIMPORT
+
+T;3;Linea
+T;18;ModelloPadre;Index;Key
+T;4;ColPadre;Index;Key
+T;4;RowPadre;Index;Key
+T;18;ModelloFiglio;Index;Key
+T;4;ColFiglio;Index;Key
+T;4;RowFiglio;Index;Key

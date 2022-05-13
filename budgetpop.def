@@ -1,0 +1,15 @@
+:NATIVEIMPORT
+
+T;2;NumeroVersione;Key;Index
+T;4;OrgComm;Key;Index
+T;3;CodiceAgente;Key;Index
+T;18;Modello;Key;Index
+T;8;ValMat;Key;Index
+T;8;DataInizioValidita
+T;8;DataFineValidita
+T;12;QtaOrdinabile
+T;12;QtaOrdinata
+T;12;QtaRimanente
+T;8;Atp
+T;2;Flagcolore
+T;6;Colore

@@ -1,0 +1,12 @@
+:NATIVEIMPORT
+
+T;10;NumeroDocSap;Index;Key
+T;10;NumeroConsegna;Index;Key
+T;18;Modello;Index;Key
+T;8;Dimensione1;Index;Key
+T;8;Dimensione2;Index;Key
+T;8;Dimensione3
+T;6;QuantitaConsegnata_1
+T;6;QuantitaConsegnata_2
+T;8;DataConsegna
+T;3;Linea

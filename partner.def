@@ -1,0 +1,7 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;4;OrgComm;Index;Key
+T;2;RuoloPartner;Index;Key
+T;10;CodiceCliente;Index;Key
+T;10;CodiceClientePartner

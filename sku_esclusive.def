@@ -1,0 +1,11 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;4;OrganizzazioneCommerciale;Key;Index
+T;10;CodiceCliente;Key;Index
+T;2;GruppoCliente;Key;Index
+T;2;Linea;Key;Index
+T;20;Modello;Key;Index
+T;15;Dimensione1;Key;Index
+T;15;Dimensione2;Key;Index
+T;30;QuantitaGiacenza

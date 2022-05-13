@@ -1,0 +1,7 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;1;TipoNota;index;key
+T;30;DescrizioneNota;index;key
+T;8;DataInizioValidita;
+T;8;DataFineValidita;

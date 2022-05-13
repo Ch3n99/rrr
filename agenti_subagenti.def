@@ -1,0 +1,5 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;3;CodiceAgente;Index;Key
+T;2;CodiceSubAgente;Index;Key

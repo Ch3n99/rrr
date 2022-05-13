@@ -1,0 +1,16 @@
+T;4;OrgComm;Index;Key
+T;3;CodiceAgente;Index;Key
+T;10;CodiceCliente
+T;10;CodiceFornitore
+T;35;RagioneSociale
+T;10;DocInventario
+T;4;Esercizio
+T;3;NRiga;Index;Key
+T;10;NPartita
+T;18;Matnr;Index;Key
+T;8;ValoreMatrice
+T;1;VS
+T;40;DescrizioneMateriale
+T;4;Qta
+T;16;NRifInv;Index
+T;1;Term

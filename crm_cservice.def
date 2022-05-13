@@ -1,0 +1,8 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;16;Utente;Index;Key
+T;32;Descrizione
+T;4;CodiceRegional;Index;Key
+T;1;FlagAttivo;Index
+

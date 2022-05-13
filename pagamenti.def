@@ -1,0 +1,8 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;4;CodicePagamento;Key;Index
+T;28;DescrizionePagamento
+T;1;Utilizzabile
+T;1;FineRecord;DestLen=0
+

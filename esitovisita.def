@@ -1,0 +1,7 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;2;CodiceEsito;Index;Key
+T;64;Esito
+T;1;TipoEsito
+T;1;EsitoSignificativo

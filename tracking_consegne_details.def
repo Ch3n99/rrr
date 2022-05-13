@@ -1,0 +1,8 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;10;NumDocSAPConsegna;Key;Index
+T;255;PosizioneConsegna;Key;Index
+T;255;NumOrdine
+T;6;Posizione_Ordine
+T;6;QuantitaConsegna

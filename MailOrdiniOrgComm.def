@@ -1,0 +1,8 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Key;Index
+T;50;Mail
+T;50;MailResi
+T;50;MailInventarioRepCS
+T;50;MailInventarioRepController
+T;50;MailResoRepCS

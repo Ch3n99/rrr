@@ -1,0 +1,11 @@
+:NATIVEIMPORT
+:RECREATE
+:SEPARATOR=;
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;50;mailRegistrazione
+T;50;mailOrdine
+T;50;mailOrdineSpeciale
+T;50;mailReso
+T;50;mailContattiWeb
+T;50;mailOrgComPeD

@@ -1,0 +1,7 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;1;CodiceStato;Index;Key
+T;30;DescrizioneStato
+T;1;FlagBlocca
+T;0;CodiceAgente;index;key;destLen=10

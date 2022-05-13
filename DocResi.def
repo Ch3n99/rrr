@@ -1,0 +1,8 @@
+T;3;CodiceAgente;Index;Key
+N8;4;NumeroDoc;Index;Key
+LT;255;NotaReso
+N8;4;PezziResi
+N8;4;MaxPezziDaRendere
+T;30;CodiceReso;Index;Key
+T;8;DataDoc;Index;Key
+T;2;Provenienza;index;Key

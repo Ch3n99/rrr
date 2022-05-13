@@ -1,0 +1,7 @@
+:NATIVEIMPORT
+:RECREATE
+
+T;4;OrganizzazioneCommerciale;Key;Index
+T;6;CodiceCliente;Key;Index
+T;4;CodiceSpedizione;Key;Index
+T;3;Linea;Index;Key

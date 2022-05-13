@@ -1,0 +1,7 @@
+:NATIVEIMPORT
+
+T;4;Tipologia;Index;Key
+T;2;Lingua;Index;Key
+T;2;Linea;Index;Key
+T;100;NomeLink;Index;Key
+T;200;Path;Index;Key

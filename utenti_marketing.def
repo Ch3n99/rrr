@@ -1,0 +1,9 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;10;Codice;Index;Key
+T;32;Nome
+T;2;Lingua
+T;1;FlagAll
+T;1;FlagEsportaProdotti
+

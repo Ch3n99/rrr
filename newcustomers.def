@@ -1,0 +1,11 @@
+:NATIVEIMPORT
+
+T;4;OrgComm;Index;Key
+T;20;NOrdAcq;Index;Key
+T;8;DataNOrdAcq;Index;Key
+T;8;DataInserimentoRecord
+T;3;CodiceAgente;Index;Key
+T;4;UffVendite
+T;10;Customer
+T;12;SAPUser
+T;8;LastChangeDate

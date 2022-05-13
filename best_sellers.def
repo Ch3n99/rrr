@@ -1,0 +1,19 @@
+:NATIVEIMPORT
+:RECREATE
+:SEPARATOR=;
+
+:POSTSQL=DELETE FROM :CurrentTable: WHERE OrgComm = "ORG.COMM" AND ReleaseProdotto = "RELEASE" AND CodiceCliente = "CODICECLIENTE" 
+
+T;10;OrgComm;Index;Key
+T;6;Linea;Index
+T;10;ReleaseProdotto;Index;Key
+T;15;CodiceCliente;Index;Key
+T;15;Tipo;Index;Key
+T;10;Genere
+T;18;Modello;Index;Key
+T;10;Calibro;Index;Key
+T;6;Colore;Index;Key
+T;18;CodiceSku
+T;10;Quantita
+T;10;QuantitaColore
+T;10;QuantitaModello

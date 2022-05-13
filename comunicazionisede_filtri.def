@@ -1,0 +1,7 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;8;Id;index;key
+T;2;Lingua;index;key
+T;256;Tipo
+T;256;Nome

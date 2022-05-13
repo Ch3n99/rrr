@@ -1,0 +1,11 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Key;Index
+T;4;CodiceCapoArea;Index
+T;20;DescrizioneCapoArea
+T;3;CodiceAgente;Key;Index
+T;20;Descrizione
+T;50;Email
+T;16;NTel
+T;35;NomeAgente
+

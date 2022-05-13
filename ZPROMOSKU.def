@@ -1,0 +1,7 @@
+:SEPARATOR=;
+
+T;128;OrgComm;Index;Key
+T;128;CodicePromozione;Index;Key
+T;128;CodiceMateriale;Index;Key
+T;128;ValoreMatrice;Index;Key
+T;128;NPzMinimo

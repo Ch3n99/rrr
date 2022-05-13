@@ -1,0 +1,9 @@
+:NATIVEIMPORT
+:SEPARATOR=;
+
+T;10;NumFattura;Key;Index
+T;1;TipoFattura;Index
+T;8;DataFattura
+T;10;CodicePagatore
+T;100;ImportoFattura
+T;8;DataEstrazione

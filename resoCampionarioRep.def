@@ -1,0 +1,12 @@
+:NATIVEIMPORT
+
+T;4;OrgComm;Index;Key
+T;3;CodiceAgente;Index;Key
+T;10;CodiceCliente
+T;35;RagioneSociale
+T;18;Matnr;Index;Key
+T;8;ValoreMatrice;Index;Key
+T;1;VS
+T;40;DescrizioneMateriale
+T;4;Qta
+T;0;NRifInv;DestLen=1

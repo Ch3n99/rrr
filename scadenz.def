@@ -1,0 +1,26 @@
+:NATIVEIMPORT
+:RECREATE
+:POSTSQL=update :CurrentTable: set datascadenza=CONCAT(MID(datascadenza,7,4),MID(datascadenza,4,2),MID(datascadenza,1,2))
+
+T;4;OrganizzazioneCommerciale
+T;2;TipoPartita;Index
+T;2;AnnoPartita;Index
+T;1;Flag1
+T;10;NumeroPartita;Index
+T;2;TipoDocumentoProtocollo
+T;2;AnnoDocumentoProtocollo
+T;10;NumeroDocumentoProtocollo
+T;10;DataDocumento
+T;12;Importo
+T;2;TipoDocumentoPag;Index
+T;2;AnnoDocumentoPag
+T;1;Flag2
+T;10;NumeroDocumentoPag
+T;10;DataDocumentoPag
+T;10;DataScadenza
+T;1;Csv_rata
+T;12;Scaduto
+T;1;Segno
+T;10;CodiceCliente;Index
+T;3;CodiceAgente
+T;10;DataProtocollo

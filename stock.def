@@ -1,0 +1,11 @@
+:NATIVEIMPORT
+
+T;4;OrganizzazioneCommerciale;Index;Key
+T;18;Modello;Index;Key
+T;8;Dimensione1;Index;Key
+T;8;Dimensione2;Index;Key
+T;12;Qta
+T;2;FlagColore
+T;6;Colore
+T;12;GiacNeg
+T;8;ATPDate 
