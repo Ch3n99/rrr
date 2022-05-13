@@ -1,0 +1,17 @@
+T;1;Marker1
+T;3;CodiceAgente;Index;Key
+T;30;CodiceReso;Index
+T;10;CodiceCliente
+T;10;CodiceSpedizione
+N8;4;NumeroDoc;Index;Key
+T;8;DataDoc;Index;Key
+T;2;Provenienza;Index;Key
+T;3;Linea;Index;Key
+LT;255;NotaReso
+N8;4;PezziResi
+N8;4;Budget
+N8;4;BudgetResiduo
+N8;4;PercentualeAutorizzata
+N8;4;MaxPezziDaRendere
+N8;1;Exported
+T;8;NumeroDocLong

@@ -1,0 +1,6 @@
+T;3;CodiceAgenteReale;Index;Key
+N8;1;NumeroDoc;Index;Key;Align=right;pad='0';Index;Key
+T;8;DataDoc;Index;Key
+T;2;Provenienza;Index;Key
+T;3;AgenteFittizio;Key;Index
+N8;1;NumeroDocAgenteFittizio;Key;Index

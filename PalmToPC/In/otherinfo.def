@@ -1,0 +1,16 @@
+T;1;Marker1
+T;16;CodiceAgente;Index;Key
+T;2;Provenienza;Index;Key
+T;16;InfoType;Index;Key
+T;64;Key1;Index;Key
+T;64;Key2;Index;Key
+T;64;Key3;Index;Key
+T;64;Field1
+T;64;Field2
+T;64;Field3
+T;64;Field4
+T;64;Field5
+T;255;Note1
+T;255;Note2
+T;255;Note3
+T;1;Exported;Index

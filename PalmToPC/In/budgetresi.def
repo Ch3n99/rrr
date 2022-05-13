@@ -1,0 +1,7 @@
+T;1;Marker1;DestLen=0
+T;3;CodiceAgente;Index;Key
+N8;5;Budget
+T;8;DataInizio;Index;key
+T;8;DataFine
+N1;3;PercentualeAutorizzata
+T;3;Linea;Index;key

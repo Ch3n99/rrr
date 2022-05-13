@@ -1,0 +1,11 @@
+T;4;OrganizzazioneCommerciale
+T;1;SEP
+T;6;CodiceCliente
+T;1;SEP
+T;34;CodiceArticolo
+T;1;SEP
+T;8;DataRegistrazione;Index;Key
+T;1;SEP
+T;5;Causale;Index;Key
+T;1;SEP
+N8;5;Qta

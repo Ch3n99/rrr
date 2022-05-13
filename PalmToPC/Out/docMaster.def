@@ -1,0 +1,13 @@
+T;2;TR;
+T;6;CodiceCliente
+T;4;CodiceDestinazione
+T;3;CodiceAgente
+T;8;DataDoc
+T;8;DataConsegna
+T;3;ALTRO
+T;1;TipoLinea
+T;1;FlagNumPezzi
+T;4;numeroPezzi
+T;1;flagConsegnaAnticipata
+T;4;TipoDoc
+T;6;CodicePromo
