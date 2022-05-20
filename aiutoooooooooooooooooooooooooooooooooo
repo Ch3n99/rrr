@@ -1,0 +1,1841 @@
+{ Script export da gestionale verso palmare}
+
+{$I ..\..\Common\Common.lib}
+
+const gBADOWNLOADVERSION          = '0.1';
+const gEXPVERSION                 = '0.2';
+
+var
+    exportDate,destDirectoryIni:string;
+
+
+
+procedure AddFileToExport(db: TDataBase; destTxtFileName, defFileName, sqlQuery, internalName: string; params: TStringList; deleteFile: boolean; fileType: TImpExpFileType);
+begin
+  if sqlQuery = '' then
+    exit;
+
+  addToLog(Format('%s [%s] <- query: %s [%s]', [ExtractFileName(destTxtFileName), internalName, sqlQuery, defFileName]));
+  db.AddToExport(destTxtFileName, defFileName, sqlQuery, internalName, params, deleteFile, fileType);
+end;
+
+function DataToZip(sourceDir,destZipFileName:string;title:string):boolean;
+begin
+  if GetFileCount(sourceDir,'*.*')<=0 then exit;
+
+  destZipFileName:=PurifyPath(destZipFileName);
+  OutputAddWithIndentWithTime(title,rvsNormal,owZip);
+  AddToLog(Format('creazione file "%s"...',[destZipFileName]));
+
+  try
+    result:=ZipCreate(sourceDir,'*.*',destZipFileName);
+    OutputAddNoNewLine('OK.',rvsNormal,owNoIcon);
+    AddToLog(Format('compressione file "%s" avvenuta con successo.',[destZipFileName]));
+  except
+    OutputAddNoNewLine('NON OK.',rvsError,owNoIcon);
+    OutputAddWithTime(Format('compressione file esportati avvenuta con errori: %s',[ExceptionParam]),rvsError,owStop);
+    AddToLog(Format('compressione file "%s" avvenuta con errori (%s).',[destZipFileName,ExceptionParam]));
+
+    result:=false;
+  end;
+end;
+
+procedure BeforeExportField(Sender: TObject; fileName, defFileName, internalName, fieldName: string; rowNumber, defFieldNumber, defFieldLen: integer; var fieldVal: string; var canContinue: boolean);
+begin
+  internalName:=Uppercase(internalName);
+  fieldName:=Uppercase(trim(fieldName));
+
+
+
+end;
+
+procedure SetExported_(db:TDataBase;tblName,auxCond:string);
+begin
+  SetExportedFlagEx(db,tblName,auxCond,gEXPORTEDFLAG_BATOGEST,gEXPORTEDFLAG_GESTTOBA);
+end;
+
+//cancella i file LAST presenti nella cartella export (a seuiguito di un ftp fallito)
+procedure RemoveLastFile(old_dir,export_dir:string);
+var
+  list:TStringList;
+  i:integer;
+  fName,oldPath:string;
+begin
+  ForceDirectories(old_dir);
+  list:=TStringList.Create();
+
+
+  try
+    //ottengo lista file in last
+    BuildFileList(PurifyPath(old_dir)+'\*.*',0,list);
+    for i:=0 to list.count-1 do
+    begin
+      fName:=list[i];
+      oldPath:=PurifyPath(Format('%s\%s',[old_dir,fName]));
+      AddToLog(Format('RemoveLastFile: Elimino file %s dalla cartella %s',[fName,old_dir]));
+      DeleteFile(oldPath);
+    end;
+  finally
+    list.Free;
+  end;
+end;
+
+function DoExportDiffConfigFile(db:TDataBase;codiceAgente,destdir:string):boolean;
+var
+  rec:TZQuery;
+  nome:string;
+  diff_text:TStringList;
+begin
+  //creo agent.ini.diff
+  rec:=TZQuery.Create(nil);
+  rec.Connection:=TZConnection(db);
+  rec.sql.add('select * from agenti where codiceagente='''+codiceAgente+''' ');
+  rec.open;
+  nome:='';
+  if(not rec.eof)then
+  begin
+    nome:=trim(rec.FieldByName('nome').asstring);
+    diff_text:=TStringList.Create();
+    diff_text.Append('[Operator]'+#13+#10+'OperatorCode = '+codiceAgente+#13#10+'OperatorName = '+nome);
+    diff_text.SaveToFile(destdir+'Agent.ini.diff');
+  end;
+  rec.close;
+  result:=true;
+
+
+
+  {
+  //creo file diff per valuta agente
+  //estraggo valuta da listino
+  result:=true;
+  valuta:='EUR';
+  rec.sql.clear;
+  rec.sql.add(Format('select distinct listcli.valuta from anagrcli join lineecli on(lineecli.CodiceCliente=anagrcli.CodiceCliente) join lineeage on(anagrcli.zona=lineeage.zona AND lineecli.CodiceLinea=lineeage.CodiceLinea AND lineeage.CodiceAgente=''%s'') join listcli on(anagrcli.listino=listcli.TipoListino) limit 1',[codiceAgente]));
+  try
+    rec.open;
+    if( not rec.eof) then
+      valuta:=trim(rec.FieldByName('valuta').asstring);
+  except
+  end;
+  //creo file businessagent.ini.diff
+  diff_text:=TStringList.Create();
+  diff_text.Append('[AgentData]'+#13+#10+'MainValue = '+valuta);
+  diff_text.SaveToFile(destdir+'BusinessAgent.ini.diff');
+  }
+end;
+
+function DoExportAccounts(db:TDataBase;codiceAgente:string;destNotCryptedFileName,destCryptedFileName:string):boolean;
+var
+  rec:TZQuery;
+  str,pwd,nome:string;
+  accountList:TStringList;
+begin
+  //TODO
+  //ShowMessage('Esportare la tabella agenti per la gestione degli accounts....TODO');
+  exit;
+  OutputAddWithIndentWithTime('creazione accounts in corso...',rvsNormal,owUnion);
+  SetStatusBarText(Format('creazione accounts "%s"...', [ExtractFileName(destCryptedFileName)]));
+  AddToLog(Format('creazione file accounts "%s"...',[destCryptedFileName]));
+
+  db.TotalFileToExport:=db.TotalFileToExport+1;
+  db.LastFileToExport:=db.LastFileToExport+1;
+
+  accountList:=TStringList.Create();
+  rec:=TZQuery.Create(nil);
+  rec.Connection:=TZConnection(db);
+  rec.sql.add(Format('select * from agenti where codiceAgente=''%s''',[codiceAgente]));
+
+  try
+    rec.open;
+
+    str:=ComposeAccountStr('admin',gDEFAULT_ADMIN_ACCOUNT_PASSWORD,'Amministratore','0',true,20,10,40,4);
+
+    accountList.Add(str);
+    while not rec.eof do
+    begin
+      nome:=trim(rec.FieldByName('descrizione').asstring);
+      pwd:=codiceAgente;
+      str:=ComposeAccountStr(codiceAgente,pwd,nome,codiceAgente,false,20,10,40,4);
+      accountList.Add(str);
+
+      rec.next;
+    end;
+
+    result:=true;
+  except
+    result:=false;
+  end;
+
+  result:=CreateCryptedAccountFileFromStrings(accountList,destCryptedFileName,gCRYPTED_ACCOUNT_FILE_PASSWORD,destNotCryptedFileName);
+
+  if result then
+  begin
+    OutputAddNoNewLine('OK.',rvsNormal,owNoIcon);
+    AddToLog(Format('creazione file "%s" avvenuta con successo.', [destCryptedFileName]));
+    db.LastExportedFileCount:=db.LastExportedFileCount+1;
+    db.TotalExportedFileCount:=db.TotalExportedFileCount+1;
+
+  end
+  else
+  begin
+    OutputAddNoNewLine('NON OK.',rvsError,owNoIcon);
+    AddToLog(Format('creazione file "%s" avvenuta con errori.', [destCryptedFileName]));
+    db.LastExportedErrorFileCount:=db.LastExportedErrorFileCount+1;
+    db.TotalExportedErrorFileCount:=db.TotalExportedErrorFileCount+1;
+
+  end;
+end;
+
+procedure SetExportedEx(db:TDataBase;auxCond:string);
+begin
+  //db.ExecuteSql('update fattmaster set Exported=1 where Exported=0 and '+ auxCond);
+  //db.ExecuteSql('update ordini_sede set Exported=1 where Exported=0 and '+ auxCond);
+
+  {
+  SetExportedFlagEx(db,'client',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'anagpag',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'predocl1',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'predocl2',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'prodotti',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'righel',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'staticli',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'ecp1',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'ecp2',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'righel',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  }
+  SetExportedFlagEx(db,'testataordinidiretti',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+  SetExportedFlagEx(db,'docmaster_b2b',auxCond,gEXPORTEDFLAG_GESTTOBA,gEXPORTEDFLAG_EXPORTED_GESTTOBA);
+end;
+
+function DoSingleFtp(db:TDatabase;ftpHostName,ftpUserName,ftpPassword,ftpBaseDir:string;passiveMode:boolean;agentList:TStringList;fullExport:boolean):boolean;
+var
+  i:integer;
+  srcDirs,dstDirs,backDirs:TStringList;
+  agentCode,src,dst,back,sql,prov:string;
+  destDir,destLastExpDir,dstTest,ageTest:string;
+  qry,qryTest:TZQuery;
+
+begin
+  OutputAddEmptyLine();
+  result:=true;
+  if ftpHostName='' then
+    exit;
+
+  srcDirs:=TStringList.Create();
+  dstDirs:=TStringList.Create();
+  backDirs:=TStringList.Create();
+
+
+  try
+    FtpInit(true,true);
+    FtpConnect(ftpHostName,ftpUserName,ftpPassword);
+    FtpSetMode(passiveMode);
+
+    ftpBaseDir:=PurifyFtpPath(ftpBaseDir);
+
+
+    if FtpGetCurrentDir()<>ftpBaseDir then
+    begin
+      if not FtpChangeDir(ftpBaseDir) then
+      begin
+        FtpCreateDirRec(ftpBaseDir);
+        FtpChangeDir(ftpBaseDir);
+      end;
+    end;
+
+
+    qry:=TZQuery.create(nil);
+    qry.Connection:=TZConnection(db);
+    qryTest:=TZQuery.create(nil);
+    qryTest.Connection:=TZConnection(db);
+    for i:=0 to agentList.count-1 do
+    begin
+      agentCode:= agentList[i];
+      agentCode:=trim(mid(agentList[i], 1, 10));
+
+      //trovo subagenti
+      sql:='SELECT "0" AS Provenienza ';
+      sql:=sql+'UNION ';
+      sql:=sql+'SELECT CodiceSubAgente as Provenienza FROM agenti_subagenti WHERE codiceAgente="'+agentCode+'" ';
+      sql:=sql+'ORDER BY Provenienza DESC ';
+      qry.sql.text:=sql;
+      qry.open;
+      while not qry.Eof do begin
+        prov:=Trim(qry.FieldByName('provenienza').asstring);
+        src:=GetToPalmExportDestinationDirPath(agentCode);
+        back:=GetToPalmExportBackupDirPath(agentCode);
+        ForceDirectories(back);
+
+
+        //copio su eventuale cartella dell'agente test
+        qryTest.sql.text:='SELECT agente_test FROM agenti_test WHERE agente_reale="'+agentCode+'" ';
+        qryTest.open;
+        while not qryTest.Eof do begin
+          ageTest:=Trim(qryTest.FieldByName('agente_test').asstring);
+          dstTest:=Format('%s/%s/%s',[ageTest,gFTPDOWNLOAD_DEFAULTDIR,prov]);
+          FtpCreateDirRec(dstTest);
+          FtpPutFiles(src,'*',dstTest);
+          qryTest.Next;
+        end;
+        qryTest.close
+
+        //copio su cartella dell'agente reale
+        //in base alla provanienza...
+        dst:=Format('%s/%s/%s',[agentCode,gFTPDOWNLOAD_DEFAULTDIR,prov]);
+        FtpCreateDirRec(dst);
+        if(prov<>'0')then begin
+          //...se > 0....copio file su sottocartella della provenienza
+          FtpPutFiles(src,'*',dst);
+        end else begin
+          //...se = 0....sposto file su sottocartella della provenienza
+          result:=FtpPutFilesAndMove(src,'*',dst,back);
+        end;
+          result:=FtpPutFilesAndMove(src+'\'+prov,'*',dst,back) and result; 
+
+
+
+        qry.Next;
+      end;
+
+
+{
+      src:=GetToPalmExportDestinationDirPath(agentCode);
+      back:=GetToPalmExportBackupDirPath(agentCode);
+      //agentCode:=strpadleft(agentCode,6,'0');
+      dst:=Format('%s/%s/',[agentCode,gFTPDOWNLOAD_DEFAULTDIR]);
+
+      //Se sono in fullExport cancello la cartella
+      //if(fullExport)then FtpDeleteDirRec(dst);
+
+      //(ri)Creo cartella download
+      FtpCreateDirRec(dst);
+
+      //Invio files
+      result:= result and FtpPutFiles(src,'*',dst);
+
+}
+
+      //Se ftp fallito, cancello file last
+      if(result=false)then
+      begin
+        AddToLog(Format('Cancello file LAST per l''agente %s perché ftp non riuscito ',[agentCode]));
+        destDir                         :=  GetToPalmExportDestinationDirPath(agentCode);
+        destLastExpDir                  :=  GetToPalmExportTempDestinationDirPath(agentCode);
+        RemoveLastFile(destDir+'\last', destLastExpDir);
+      end;
+
+
+
+        srcDirs.Add(src);
+        dstDirs.Add(dst);
+        backDirs.Add(back);
+    end;
+
+    OutputAddEmptyLine();
+    //result:=FtpPutDirsAndMove(srcDirs,dstDirs,'*',backDirs);
+
+    for i:=0 to backDirs.count-1 do
+      RemoveDir(backDirs[i]);    // rimuove la directory solo se è vuota
+
+    FtpDisconnect();
+    FtpDeInit();
+    OutputAddEmptyLine();
+  finally
+    srcDirs.Free;
+    dstDirs.Free;
+    backDirs.Free;
+  end;
+end;
+
+function DoFtp(db:TDataBase;agentList:TStringList;fullExport:boolean):boolean;
+begin
+  OutputAddWithTime(Format('Inizio upload file generati da app ForSales (versione: %s)...',[gBADOWNLOADVERSION]),rvsHeading,owDBExport);
+  OutputAddSeparator();
+
+  result:=true;
+  if agentList.count>0 then
+  begin
+     result:=result and DoSingleFtp(db,gFtp1HostName,gFtp1UserName,gFtp1Password,gFtp1BaseDir,gFtp1PassiveMode,agentList,fullExport);
+     result:=result and DoSingleFtp(db,gFtp2HostName,gFtp2UserName,gFtp2Password,gFtp2BaseDir,gFtp2PassiveMode,agentList,fullExport);
+  end;
+end;
+
+function _GetRepFileName(filename:string;fullExport:boolean):string;
+begin
+  if fullExport then
+    result:=Format('%s.txt',[filename])
+  else
+    result:=Format('%s.iup.%s',[filename,GetTimestamp]);
+end;
+
+function _GetDelFileName(filename:string):string;
+begin
+  result:=Format('%s.txt.del.%s',[filename,GetTimestamp]);
+end;
+
+function CheckForExport(db:TDatabase;codiceAgente:string;fullExport:boolean):boolean;
+var
+sql:string;
+begin
+  sql:='select * ';
+  sql:=sql+'from cliepandea ';
+  sql:=sql+Format('where codiceAgente=''%s'' ',[codiceAgente]);
+
+  if not fullExport then
+    sql:=sql+Format(' and cliepandea_exported_=%d',[gEXPORTEDFLAG_GESTTOBA]);
+
+
+  result:=db.HaveRecords(sql);
+end;
+
+
+procedure ExportOnlyNewFiles(old_dir,export_dir:string);
+var
+  list:TStringList;
+  i:integer;
+  fName,exportPath,oldPath:string;
+begin
+  ForceDirectories(old_dir);
+  list:=TStringList.Create();
+  try
+    //ottengo lista file nuovi
+    BuildFileList(PurifyPath(export_dir)+'\*.*',0,list);
+    for i:=0 to list.count-1 do
+    begin
+      fName:=list[i];
+      exportPath:=PurifyPath(Format('%s\%s',[export_dir,fName]));
+      oldPath:=PurifyPath(Format('%s\%s',[old_dir,fName]));
+      //if((FileSize(exportPath)=0) or (FileCompare(exportPath,oldPath)=true)) then
+      if((FileCompare(exportPath,oldPath)=true)) then
+      begin
+        //il file exportPath è già stato esportato lo cancello
+        //ShowMessage('Cancello '+exportPath);
+        AddToLog(Format('il file %s è già presente in LAST (%s). lo cancello.', [exportPath,oldPath]));
+        DeleteFile(exportPath);
+      end
+      else
+      begin
+        //file nuovo, lo copio in oldPath
+        //ShowMessage('Copio '+exportPath+' in '+oldPath);
+        AddToLog(Format('il file %s è stato aggiornato. lo copio in %s.', [exportPath,oldPath]));
+        if(FileExists(oldPath)) then DeleteFile(oldPath);
+        CopyFile(exportPath,oldPath,true); //se non esister in old lo copio e mantengo originale
+      end;
+    end;
+  finally
+    list.Free;
+  end;
+end;
+
+function DataToZip_Filter(filter,sourceDir,destZipFileName:string;title:string):boolean;
+begin
+  if GetFileCount(sourceDir,filter)<=0 then exit;
+
+  destZipFileName:=PurifyPath(destZipFileName);
+  OutputAddWithIndentWithTime(title,rvsNormal,owZip);
+  AddToLog(Format('creazione file "%s"...',[destZipFileName]));
+
+  try
+    result:=ZipCreate(sourceDir,filter,destZipFileName);
+    OutputAddNoNewLine('OK.',rvsNormal,owNoIcon);
+    AddToLog(Format('compressione file "%s" avvenuta con successo.',[destZipFileName]));
+  except
+    OutputAddNoNewLine('NON OK.',rvsError,owNoIcon);
+    OutputAddWithTime(Format('compressione file esportati avvenuta con errori: %s',[ExceptionParam]),rvsError,owStop);
+    AddToLog(Format('compressione file "%s" avvenuta con errori (%s).',[destZipFileName,ExceptionParam]));
+
+    result:=false;
+  end;
+end;
+
+{*********************************************** InitUnifarcoIni ************************************}
+function InitUnifarcoIni():boolean;
+var
+  ini:TIniFile;
+  str:string;
+begin
+  result:=false;
+  if not FileExists('Unifarco.ini') then
+  begin
+    MessageDialog(Format('File di configurazione "%s" non trovato. La procedura verrà terminata.',['Unifarco.ini']),mtError,[mbOk]);
+    AddToLog(Format('File di configurazione "%s" non trovato.',[gConfigurationIni]));
+    exit;
+  end;
+  try
+    try
+      ini:=TIniFile.Create(GetApplicationPath() + 'Unifarco.ini');
+
+      //init variables
+      exportDate                     :=  ini.ReadString('Global','DateExport','');
+      destDirectoryIni               :=  ini.ReadString('Global','ExportDir','');
+
+      // init dirs
+      ForceDirectories(destDirectoryIni);
+
+      result:=true;
+
+      except
+      str:=Format('Exception: %s',[GetExceptionsString()]);
+      MessageDialog(str,mtError,[mbOk]);
+      AddToLog(str);
+      result:=false;
+    end;
+  finally
+    ini.free;
+  end;
+end;
+
+function DoExport(db:TDatabase;exportAgentList:TStringList;enableDataExport,enableAccountsExport:boolean;fullExport:boolean;flag_export:string;opType:integer):boolean;
+var
+  sql,codiceAgente,nomeTabella,in_sql,ts,codice_base,sub_agenti,nazione_gerarchia,lingua_scheda:string;
+  params,lst_subage:TStringList;
+  test_query:TZQuery;
+  anno_corrente:integer;
+
+  destDir,destLastExpDir,destLastExpDirSource,destNotCrypyedAccountsPath,errDestDir,lingua,nazioneAgente,provenienza:string;
+  i,dataFilesToExportCount,accountsFilesToExportCount:integer;
+  exportErrors,flagGerarchia:boolean;
+  exportedAgent,idx:integer;
+  rec:TZQuery;
+begin
+  result:=true;
+  exportErrors:=false;
+  OutputAddWithTime(Format('inizio esportazione dati (versione: %s)...',[gEXPVERSION]),rvsHeading,owDBExport);
+  AddToLog(Format('inizio esportazione dati (versione: %s)...', [gEXPVERSION]));
+
+  test_query:=TZQuery.create(nil);
+  test_query.Connection:=TZConnection(db);
+
+  rec:=TZQuery.Create(nil);
+  rec.Connection:=TZConnection(db);
+
+  OutputAddSeparator();
+  OutputAddEmptyLine();
+
+//  db.OnBeforeExportField   :=  @BeforeExportField;
+
+  exportedAgent:=0;
+  params:=TStringList.create;
+
+  //Caloclo Timestamp esportazione
+  ts:=Mid(GetTimeStamp(),0,8);
+  anno_corrente:=strtoint(Mid(GetTimeStamp(),0,4));
+  {
+  anno_corrente:=strtoint(Mid(GetTimeStamp(),0,4));
+  anno_corrente:=anno_corrente-1;
+  if(FullExport) then anno_corrente:=2006;  //esporto dal 2005
+  ts:=inttostr(anno_corrente) + Mid(GetTimeStamp(),5,4);
+  anno_corrente:=strtoint(Mid(GetTimeStamp(),0,4));
+  ts_ext:=Mid(GetTimeStamp(),7,2) + '/' + Mid(GetTimeStamp(),5,2) + '/' + Mid(GetTimeStamp(),1,4);
+  }
+
+  //Uso cache per export dati: ad sql uguale corrisponde file esportato uguale
+  //db.UseExportCache:=true;
+  //db.ExportCacheDir:='.\Cache\Export\';
+  //db.ClearCache();
+
+
+  //Se sono in export di TEST (flag_export=1) esporto solo per il primo agente e cambio il timestamp
+  if((flag_export='1') and (exportAgentList.count>0) )then begin
+    //tengo solo il primo agente selezionato
+    codiceAgente := exportAgentList[0];
+    exportAgentList.clear;
+    exportAgentList.append(codiceAgente);
+
+    //cambio timestamp
+    InitUnifarcoIni();
+    ts:= exportDate;
+    anno_corrente:= strtoint(Mid(ts,0,4));
+  end;
+
+
+  //Per ogni Agente...
+  for i:=0 to exportAgentList.count-1 do
+  begin
+    codiceAgente:=trim(mid(exportAgentList[i],1,10));
+    exportAgentList[i]:=codiceAgente;
+
+    dataFilesToExportCount:=0;
+    accountsFilesToExportCount:=0;
+
+    destDir                         :=  GetToPalmExportDestinationDirPath(codiceAgente);
+    destLastExpDir                  :=  GetToPalmExportTempDestinationDirPath(codiceAgente);
+    destNotCrypyedAccountsPath      :=  destLastExpDir+'\Accounts\';
+    ForceDirectories(destDir);
+    ForceDirectories(destLastExpDir);
+    ForceDirectories(destNotCrypyedAccountsPath);
+    ForceDirectories(GetFromPalmImportSourceDirPath(codiceAgente));
+    DeleteFiles(destDir+'*');
+    DeleteFiles(destLastExpDir+'*');
+    //controllo
+    sql:='SELECT "0" AS Provenienza ';
+    sql:=sql+'UNION ';
+    sql:=sql+'SELECT CodiceSubAgente as Provenienza FROM agenti_subagenti WHERE codiceAgente="'+codiceAgente+'" ';
+    sql:=sql+'ORDER BY Provenienza DESC ';
+    rec.sql.text:=sql;
+    rec.open;
+    while not rec.eof do begin
+        provenienza:=trim(rec.FieldByName('Provenienza').asstring);
+        ForceDirectories(GetToPalmExportDestinationSourceDirPath(codiceAgente,provenienza));
+        ForceDirectories(GetToPalmExportTempDestinationSourceDirPath(codiceAgente,provenienza));
+        DeleteFiles(GetToPalmExportDestinationSourceDirPath(codiceAgente,provenienza)+'*');
+        DeleteFiles(GetToPalmExportTempDestinationSourceDirPath(codiceAgente,provenienza)+'*');  
+        rec.next;
+    end;
+    rec.close;
+    
+    if(flag_export='1')then  //cambio cartella di destinazione se sono in test
+      destDir:=destDirectoryIni;
+
+    OutputAddWithTime(Format('inizio esportazione dati agente "%s"...', [codiceAgente]),rvsSubHeading,owRoundArrowLeft);
+    inc(exportedAgent);
+    db.ExportIfNoRecords:=true;
+    if enableAccountsExport then
+    begin
+      //DoExportAccounts(db,codiceAgente,destNotCrypyedAccountsPath+gACCOUNTS_FILENAME,destDir+gACCOUNTS_FILENAME_CRYPTED);
+      //DoExportDiffConfigFile(db,codiceAgente,destDir);
+      //accountsFilesToExportCount:=accountsFilesToExportCount+1;
+    end;
+    params.clear;
+    params.Add(codiceAgente);
+
+    if enableDataExport then
+    begin
+      //db.ExportIfNoRecords:=fullExport;
+
+      //Imposto lingua in base all'agente
+      lingua:='ITA';
+      nazioneAgente:='IT';
+      rec.sql.text:='select LINGUA_0,NAZIONE_0 from agenti where CODAGENTE_0='''+codiceAgente+''' ';
+      rec.open;
+      if(not rec.eof)then
+      begin
+        lingua:=trim(rec.FieldByName('LINGUA_0').asstring);
+        nazioneAgente:=trim(rec.FieldByName('NAZIONE_0').asstring);
+      end;
+      rec.close;
+
+
+      //Determino se il codice dispone di una gerarchia (clienti e storico) da esportare
+      flagGerarchia:=false;
+      nazione_gerarchia:='';
+      rec.sql.text:='SELECT flagGerarchia,Nazione FROM agenti_export WHERE codiceAgente="'+codiceAgente+'" ';
+      rec.open;
+      if(not rec.eof)then
+      begin
+        flagGerarchia:=trim(rec.FieldByName('flagGerarchia').asstring) = '1';
+        nazione_gerarchia:=trim(rec.FieldByName('Nazione').asstring);
+      end;
+      rec.close;
+      rec.sql.clear;
+
+      //Determino codice agente base
+      codice_base:=codiceAgente;
+      if(Pos('_', codice_base) > 0) then codice_base:=Mid(codice_base,Pos('_', codice_base)+1,10);
+
+      //Se il codice agente è quello base, azzero flag gerarchia
+      if(codice_base = codiceAgente) then flagGerarchia:=false;
+
+      //determino subagenti
+      sub_agenti:='"'+codiceAgente+'"';
+      if flagGerarchia then begin
+        //imposto lingua in base alla nazione del codice 'Terzi'
+        lingua:='ITA';
+        nazioneagente:=nazione_gerarchia;
+        if nazione_gerarchia = 'BE' then lingua:='FRA';
+        if nazione_gerarchia = 'DE' then lingua:='GER';
+        if nazione_gerarchia = 'AT' then lingua:='GER';
+        if nazione_gerarchia = 'CH' then lingua:='GER';
+        if nazione_gerarchia = 'FR' then lingua:='FRA';
+        if nazione_gerarchia = 'ES' then lingua:='SPA';
+
+        lst_subage:=GetSubAgeFromAge(db,codiceAgente);
+        for idx:=0 to lst_subage.count - 1 do begin
+          sub_agenti:=sub_agenti+',"'+ lst_subage[idx] +'"';
+        end;
+      end;
+
+      if ((opType = gFULLSYNC) or (opType = gONLYPROMOSYNC) or (opType = gONLYSCHEDACLI)) then
+      begin
+       //schedacliente
+        lingua_scheda:='IT';  //todo: impostare la linga_scheda in funzione della variabile lingua
+        nomeTabella:='schedacli_master';
+        //sql:='select "" as RequestPattern, "" as ConfigPattern, schedacli_master.* from schedacli_master where lngIsoCode = "' + lingua_scheda + '" and  (OrgCom like "%#'+nazioneAgente+'#%" or OrgCom = "") ';
+        //sql:='select "" as RequestPattern, "" as ConfigPattern, schedacli_master.* from schedacli_master where (OrgCom like "%#'+nazioneAgente+'#%" or OrgCom = "") ';
+        sql:='select IF (FlagObbligatoria = "", IF (FlagRichiesta = "1","300000","000000"),"") AS RequestPattern, "" as ConfigPattern, schedacli_master.* from schedacli_master where (OrgCom like "%#'+nazioneAgente+'#%" or OrgCom = "") ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        nomeTabella:='schedacli_domande';
+        //sql:='select schedacli_domande.* from schedacli_domande where lngIsoCode = "' + lingua_scheda + '" and  (OrgCom like "%#'+nazioneAgente+'#%" or OrgCom = "") ';
+        sql:='select schedacli_domande.* from schedacli_domande where (OrgCom like "%#'+nazioneAgente+'#%" or OrgCom = "") ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        nomeTabella:='schedacli_valori';
+        //sql:='select schedacli_valori.* from schedacli_valori where lngIsoCode = "' + lingua_scheda + '" and  (OrgCom like "%#'+nazioneAgente+'#%" or OrgCom = "")';
+        sql:='select schedacli_valori.* from schedacli_valori where (OrgCom like "%#'+nazioneAgente+'#%" or OrgCom = "")';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+      end;
+
+      //2016.04.15+ Federico esportazione solo ordini farmacia
+      if ((opType = gFULLSYNC) or (opType = gONLYPROMOSYNC)) then
+      begin
+        //Elenco agenti su cui ho visibilità
+        nomeTabella:='agenti';
+        sql:='SELECT DISTINCT CODAGENTE_0 AS CodiceAgente, AGENTE_0 AS RagioneSociale FROM agenti WHERE CODAGENTE_0="'+codiceAgente+'" ';
+        sql:=sql+' UNION ';
+        sql:=sql+'SELECT DISTINCT CODAGENTE_0 AS CodiceAgente, AGENTE_0 AS RagioneSociale FROM agenti WHERE CODAGENTE_0="'+codice_base+'" ';
+        sql:=sql+' UNION ';
+        sql:=sql+'SELECT DISTINCT CODAGENTE_0 AS CodiceAgente, AGENTE_0 AS RagioneSociale FROM agenti WHERE CODAGENTE_0 IN ('+sub_agenti+') ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //infoAgente (infoKey, infoVal)
+        nomeTabella:='infoAgente';
+        sql:='SELECT "Codice" AS InfoKey, "'+codiceAgente+'" AS InfoVal ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT "Nome" AS InfoKey, (SELECT AGENTE_0 FROM agenti WHERE CODAGENTE_0 = "'+codiceAgente+'") ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT "FlagGerarchia" AS InfoKey, "'+booltostr(flagGerarchia,true)+'" ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT "CodiceBase" AS InfoKey, "'+codice_base+'" ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT "MailAgente" AS InfoKey, (SELECT  EMAIL_0 from agenti where CODAGENTE_0 = "'+codice_base+'") ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //esporto le risposte delle schedecliente dell'agente corrente (utile sia per la gerarchia che per inviare le risposte alle provenienze diverse)
+        nomeTabella:='docschedacliente2';
+        sql:='select docschedacliente2.*, "1" as Exported from docschedacliente2 ';
+
+        //2016.04.04+ Federico
+        //sql:=sql+'WHERE codiceAgente IN ('+sub_agenti+') ';
+        sql:=sql+'where CodiceCliente IN (SELECT DISTINCT CODCLIORD_0 FROM client  WHERE CODAGENTE_0 IN ('+sub_agenti+')) ';
+        //2016.04.04 Fine
+
+        //sql:=sql+'AND DataCreazione > MID(ADDDATE(NOW(),INTERVAL -4 YEAR)+0,1,8) ';   //in export full esporto 2 anni     //Federico: 20170919- rimozione su richiesta di Alberto Ghe
+        if not fullExport then
+          sql:=sql+'AND DataCreazione > MID(ADDDATE(NOW(),INTERVAL -30 DAY)+0,1,8) '; //in export schedulato esporto 30 giorni
+        AddFileToExport(db,destLastExpDir+'docschedacliente2.txt.iup.'+GetTimeStamp(),gToPalm_export_defsDir+'docschedacliente2.def',sql,'docschedacliente2',params,true,ieftAutomatic);
+
+        //esporto appuntamenti agenda
+        if(db.ExistsTable('agenda')) then begin
+          sql:='select 1 as exported, agenda.* from agenda ';
+          sql:=sql+'LEFT JOIN agenti_export ON(agenda.codiceAgenteCreazione = agenti_export.codiceAgente) ';
+          sql:=sql+'WHERE codiceAgenteCreazione IN ('+sub_agenti+') ';
+          if(flagGerarchia) then sql:=sql+' AND agenti_export.nazione = "'+nazione_gerarchia+'" ';
+          sql:=sql+'AND UpdateTimestamp > MID(ADDDATE(NOW(),INTERVAL -2 YEAR)+0,1,8) ';   //in export full esporto 2 anni
+          if not fullExport then
+            sql:=sql+'AND UpdateTimestamp > MID(ADDDATE(NOW(),INTERVAL -30 DAY)+0,1,8) '; //in export schedulato esporto 30 giorni
+          AddFileToExport(db,destLastExpDir+'agenda.txt.iup.'+GetTimeStamp(),gToPalm_export_defsDir+'agenda.def',sql,'agenda',params,true,ieftAutomatic);
+        end;
+
+
+        //Filtri geomarketing
+        nomeTabella:='geomarketing_filter';
+        sql:='select * from geomarketing_filter where CodiceLingua="'+lingua+'" AND idx>=0 ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //Dati Geomarketing
+        //Custom1 = Data Ultimo Ordine
+        //Custom2 = Zona Esclusiva
+        //Custom3 = Socio
+        //Custom4 = Rete
+        //Custom5 = Minisito
+        //Custom6 = ClassCerved
+        //Custom7 = Cliente/Prospect
+        //Custom8 = Agente
+        //Custom8 = Potenziale
+        nomeTabella:='geomarketing';
+        //parte clienti sede   ****************************************
+        sql:='SELECT CODCLIFAT_0 AS CodiceCliente, CODCLIORD_0 AS CodiceSpedizione, ';
+        sql:=sql+'DATEDIFF(CURDATE()+0,DATAINICON_0) as DataInizio, ';
+        sql:=sql+'CASE ';
+        sql:=sql+'    WHEN DATAINICON_0="" THEN "-" ';
+        sql:=sql+'    WHEN DATEDIFF(CURDATE()+0,DATAINICON_0) < 180 THEN "l6m" ';
+        sql:=sql+'    WHEN DATEDIFF(CURDATE()+0,DATAINICON_0) < 365 THEN "l1y" ';
+        sql:=sql+'    WHEN DATEDIFF(CURDATE()+0,DATAINICON_0) < 730 THEN "l2y" ';
+        sql:=sql+'    WHEN DATEDIFF(CURDATE()+0,DATAINICON_0) < 1825 THEN "l5y" ';
+        sql:=sql+'    ELSE "g5y" ';
+        sql:=sql+'END AS custom1, ';
+        sql:=sql+'FLAGESCLUS_0 AS custom2, ';
+        sql:=sql+'FLAGSOCIO_0 AS custom3, ';
+        sql:=sql+'FLAGRETE_0 AS custom4, ';
+        sql:=sql+'FLAGSITO_0 AS custom5, ';
+        sql:=sql+'CERVED_0 AS custom6, ';
+        //sql:=sql+'COALESCE((SELECT IF(FLOOR(DATEDIFF(CURDATE()+0,MAX(datadoc))/90)>4,4,FLOOR(DATEDIFF(CURDATE()+0,MAX(datadoc))/90)) AS giorniOrdine  FROM docmaster WHERE codiceCliente=tbcl.CODCLIFAT_0 AND CodiceDestinazione=tbcl.CODCLIORD_0),-1) AS Custom7 ';
+        sql:=sql+'IF((FLOOR(DATEDIFF(CURDATE()+0,MaxDataDoc))/90)>4,4,FLOOR(DATEDIFF(CURDATE()+0,MaxDataDoc)/90)) AS Custom7, ';
+        //sql:=sql+'COALESCE(SUBSTR(agente_0,1, 12), TbCl.CODAGENTE_0) as custom8, ';
+        sql:=sql+'COALESCE(agente_0, TbCl.CODAGENTE_0) as custom8, ';
+        sql:=sql+'IF(indice_ico_0="05","A+",IF(indice_ico_0="04","A",IF(indice_ico_0="03","B",IF(indice_ico_0="02","C",IF(indice_ico_0="01","D", ""))))) as custom9, ';
+        sql:=sql+'CONCAT( ';
+        sql:=sql+'	IF(FLAGSOCIO_0=2,"Socio","Cliente"), ';
+        sql:=sql+'	IF(indice_ico_0="05"," - A+",IF(indice_ico_0="04"," - A",IF(indice_ico_0="03"," - B",IF(indice_ico_0="02"," - C",IF(indice_ico_0="01"," - D", ""))))) ';
+        sql:=sql+') AS MarkerLabel, ';
+        sql:=sql+'CONCAT(IF(FLAGSOCIO_0=2,"socio_","customer_"),indice_ico_0) as MarkerImage ';
+        sql:=sql+'FROM client as TbCl ';
+        sql:=sql+'LEFT JOIN tmp_data_ultimo_ordine ON(TbCl.CODCLIFAT_0=tmp_data_ultimo_ordine.CodiceCliente AND TbCl.CODCLIORD_0=tmp_data_ultimo_ordine.CodiceDestinazione) ';
+        sql:=sql+'LEFT JOIN (SELECT DISTINCT codagente_0, agente_0 FROM agenti) AS tmp_age ON(TbCl.CODAGENTE_0 = tmp_age.codagente_0) ';
+        sql:=sql+'where TbCl.CODAGENTE_0 IN ('+sub_agenti+') ';
+        if flagGerarchia then sql:=sql+' AND TbCl.NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+
+        //parte clienti prospect   ***************************************
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT COD_MMAS_0 AS CodiceCliente, "" AS CodiceSpedizione, 0 AS DataInizio, "-" AS custom1, 1 AS Custom2, 1 AS Custom3, 1 AS Custom4, 1 AS custom5, "" AS custom6, "" AS Custom7, ';
+        //sql:=sql+'COALESCE(SUBSTR(agente_0,1, 12), prospect.CODAGENTE_0) as custom8, ';
+        sql:=sql+'COALESCE(agente_0, prospect.CODAGENTE_0) as custom8, ';
+        sql:=sql+'IF(indice_ico_0="05","A+",IF(indice_ico_0="04","A",IF(indice_ico_0="03","B",IF(indice_ico_0="02","C",IF(indice_ico_0="01","D", ""))))) as custom9, ';
+        sql:=sql+'IF(indice_ico_0="03", "Prospect - A", IF(indice_ico_0="02", "Prospect - B", IF(indice_ico_0="01", "Prospect - C", "Prospect"))) AS MarkerLabel, ';
+        sql:=sql+'CONCAT("prospect_", indice_ico_0) as markerImage ';
+        sql:=sql+'FROM prospect ';
+        sql:=sql+'LEFT JOIN (SELECT DISTINCT codagente_0, agente_0 FROM agenti) AS tmp_age ON(prospect.CODAGENTE_0 = tmp_age.codagente_0) ';
+        sql:=sql+'WHERE prospect.CODAGENTE_0 IN ('+sub_agenti+') ';
+        if flagGerarchia then sql:=sql+' AND prospect.NAZIONE_0 = "'+nazione_gerarchia+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //GeoCode (clienti + prospect)
+        //geocode.stato=3 --> segnalato errato
+        //geocode.stato=2 --> non trovato (geolocalizzazione non riuscita)
+        //geocode.stato=1 --> confermato (geolocalizzazione non riuscita)
+        //geocode.stato=0 --> non confermato (geolocalizzazione automatica)
+        //
+        //Geocode.origine=2 --> sede
+        //Geocode.origine=1 --> agente (presso il cliente)
+        //Geocode.origine=0 --> iPad
+        nomeTabella:='geocode';
+        sql:='SELECT CODCLIFAT_0 AS CodiceCliente, CODCLIORD_0 AS CodiceSpedizione, replace(LATITUDINE_0,",",".") AS Latitudine, replace(LONGITUDIN_0,",",".") AS Longitudine, NOW()+0 AS Timestamp_geocode, 1 AS Stato, 2 AS origine ';
+        sql:=sql+'FROM CLIENT WHERE LATITUDINE_0<>"" AND LONGITUDIN_0<>"" and LATITUDINE_0<>"0" AND LONGITUDIN_0<>"0" ';
+        sql:=sql+'AND CODAGENTE_0 IN ('+sub_agenti+') ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT COD_MMAS_0 AS CodiceCliente, "" AS CodiceSpedizione, replace(LATITUDINE_0,",",".") AS Latitudine, replace(LONGITUDIN_0,",",".") AS Longitudine, NOW()+0 AS Timestamp_geocode, 1 AS Stato, 2 AS origine ';
+        sql:=sql+'FROM prospect ';
+        sql:=sql+'WHERE LATITUDINE_0<>"" AND LONGITUDIN_0<>"" AND LATITUDINE_0<>"0" AND LONGITUDIN_0<>"0" ';
+        sql:=sql+'AND CODAGENTE_0 IN ('+sub_agenti+') ';
+        sql:=sql+'UNION ';  //esporto tutti i geocode già calcolati dei prospect non codificati da sede
+        sql:=sql+'SELECT geocode.CodiceCliente AS CodiceCliente, "" AS CodiceSpedizione, Latitudine , Longitudine , Timestamp_geocode, Stato, origine ';
+        sql:=sql+'FROM geocode ';
+        sql:=sql+'JOIN prospect ON(geocode.CodiceCliente=COD_MMAS_0 AND geocode.CodiceSpedizione="") ';
+        sql:=sql+'WHERE (LATITUDINE_0 IS NULL OR LATITUDINE_0="") AND (geocode.stato=0 or geocode.stato=1) ';
+        sql:=sql+'AND prospect.CODAGENTE_0 IN ('+sub_agenti+') ';
+         AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+
+
+
+        //clienti
+        nomeTabella:='client';
+        sql:='select distinct if(EMAILCLORD_0<>"",EMAILCLORD_0, EMAILCLFAT_0) as EMAILCLFAT_0, client.*, CODCLIORD_0 as CategoriaCliente, (CODAGENTE_0="'+codice_base+'") as FlagOrdine, 0 as TipoCliente, CODAGENTE_0 as CodiceAgente, IF(clientfatturazioneelettronica.YCODICE_0 <> "" AND CODAGENTE_0="'+codice_base+'", "1", "0") AS FlagFatturazioneElettronica ';
+        sql:=sql+'from client ';
+        sql:=sql+'LEFT JOIN clientfatturazioneelettronica ON client.CODCLIORD_0 = clientfatturazioneelettronica.YCODICE_0 ';
+        sql:=sql+'where CODAGENTE_0 IN ('+sub_agenti+') ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+        //sql:=sql+' AND   BLOCPAGORD_0=1 ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //clienti prospect    (in append alla tabella client)
+        nomeTabella:='client';
+        sql:='SELECT ';
+        sql:=sql+'COD_MMAS_0 AS CODCLIFAT_0, ';
+        sql:=sql+'"" AS CODCLIORD_0, ';
+        sql:=sql+'RAG_SOC_0 AS RAGSOC1ORD_0, ';
+        sql:=sql+'"" AS RAGSOC2ORD_0, ';
+        sql:=sql+'INDIRIZZO_0 AS INDIR1ORD_0, ';
+        sql:=sql+'CITTA_0 AS CITTAORD_0, ';
+        sql:=sql+'CAP_0 AS CAPORD_0, ';
+        sql:=sql+'PROV_0 AS PROVORD_0, ';
+        sql:=sql+'NAZIONE_0 AS NAZIONEORD_0, ';
+        sql:=sql+'TELEFONO_0 AS TELORD_0, ';
+        sql:=sql+'FAX_0 AS FAXORD_0, ';
+        sql:=sql+'P_IVA_0 AS PIVAORD_0, ';
+        sql:=sql+'COD_FISC_0 AS CFISCORD_0, ';
+        sql:=sql+'"" AS CODPAGORD_0,"" AS DESPAGORD_0,"" AS CODLISTORD_0,0 AS BLOCPAGORD_0, ';
+        sql:=sql+'RAG_SOC_0 AS RAGSOC1FAT_0, ';
+        sql:=sql+'INDIRIZZO_0 AS INDIR1FAT_0, ';
+        sql:=sql+'CITTA_0 AS CITTAFAT_0, ';
+        sql:=sql+'CAP_0 AS CAPFAT_0, ';
+        sql:=sql+'PROV_0 AS PROVFAT_0, ';
+        sql:=sql+'NAZIONE_0 AS NAZIONEFAT_0, ';
+        sql:=sql+'"" AS EMAILCLFAT_0,"" AS CategoriaCliente,"" AS ABI_0, "" AS Cab_0, "" AS IBAN_0, "" AS BANCA_0, ';
+        sql:=sql+'0 AS FlagOrdine, ';
+        sql:=sql+'2 AS TipoCliente, ';
+        sql:=sql+'CODAGENTE_0 AS CodiceAgente, ';
+        sql:=sql+'0 AS FLAGCONTRT_0, ';
+        sql:=sql+'0 AS FlagFatturazioneElettronica ';
+        sql:=sql+'FROM prospect ';
+        sql:=sql+'where CODAGENTE_0 IN ('+sub_agenti+') ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND NAZIONE_0 = "'+nazione_gerarchia+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,false,ieftAutomatic);
+
+        //Info cliente (popup html su geomarketing)
+        nomeTabella:='info_clienti';
+        sql:='SELECT DISTINCT ';
+        sql:=sql+'CODCLIFAT_0 AS CodiceCliente,POT_PV_0,POT_COSM_0,FLAGSOCIO_0,FLAGRETE_0, TIPOETIC_0, ';
+        sql:=sql+'ROUND(FatturatoAP,2) AS FatturatoAP, ROUND(FatturatoAP_YTD,2) AS FatturatoAP_YTD, round(FatturatoAC,2) as FatturatoAC, ROUND(TrendPerc,2) AS TrendPerc, ';
+        sql:=sql+'NumeroConsegne,RankingFatturato,ReferenzePL,ReferenzeTot ';
+        sql:=sql+'FROM CLIENT ';
+        sql:=sql+'LEFT JOIN ybi_fatturati  ON(ybi_fatturati.Codice=CLIENT.CODCLIFAT_0) ';
+        sql:=sql+'LEFT JOIN ybi_statistiche  ON(ybi_statistiche.Codice=CLIENT.CODCLIFAT_0) ';
+        sql:=sql+'WHERE CODAGENTE_0 IN ('+sub_agenti+') ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT DISTINCT ';
+        sql:=sql+'COD_MMAS_0 AS CodiceCliente,POT_PV_0,POT_COSM_0,0 AS FLAGSOCIO_0, 0 AS FLAGRETE_0, "" as TIPOETIC_0, ';
+        sql:=sql+'FatturatoAP,FatturatoAP_YTD,FatturatoAC,Coalesce(TrendPerc) as TrendPerc, ';
+        sql:=sql+'NumeroConsegne,RankingFatturato,ReferenzePL,ReferenzeTot ';
+        sql:=sql+'FROM prospect ';
+        sql:=sql+'LEFT JOIN ybi_fatturati  ON(ybi_fatturati.Codice=prospect.COD_MMAS_0) ';
+        sql:=sql+'LEFT JOIN ybi_statistiche  ON(ybi_statistiche.Codice=prospect.COD_MMAS_0) ';
+        sql:=sql+'WHERE CODAGENTE_0 IN ('+sub_agenti+') ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,false,ieftAutomatic);
+
+        //stao clienti
+        nomeTabella:='staticli';
+        sql:='SELECT 1 AS CodiceStato, "" AS descrizioneStato,0 AS flagblocca ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT 2 AS CodiceStato, "Cliente bloccato" AS descrizioneStato,1 AS flagblocca ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        nomeTabella:='ecp1';
+        sql:='SELECT DISTINCT NUM_FAT_0 AS CodiceFattura, CLIENTE_0 AS CodiceCliente, ROUND(REPLACE(TOT_FATT_0,",",".")*100,0) AS ImportoFattura, ';
+        sql:=sql+'MID(DAT_FATT_0,1,4) AS AnnoFattura, ';
+        sql:=sql+'NOTA_0, ';
+        sql:=sql+'CONCAT( ';
+        //gestione stringhe EC in lingua (tradotte manualmente via query)
+        sql:=sql+'  CASE 	WHEN NOTA_0="FATTURA" AND (NAZIONEFAT_0="DE" OR NAZIONEFAT_0="AT") THEN "RECHNUNG" ';
+        sql:=sql+'  WHEN NOTA_0="FATTURA" THEN "FATTURA" ';
+        sql:=sql+'  WHEN NOTA_0="NOTA ACCREDITO" AND (NAZIONEFAT_0="DE" OR NAZIONEFAT_0="AT") THEN "GUTSCHRIFT" ';
+        sql:=sql+'  WHEN NOTA_0="NOTA ACCREDITO" THEN "NOTA ACCREDITO" ';
+        sql:=sql+'  END ';
+        sql:=sql+', ":  ", NUM_FAT_0)  AS DescrizioneFattura, ';
+        sql:=sql+'"'+ts+'" as DataEsportazione    ';
+        sql:=sql+'FROM scadenze ';
+        sql:=sql+'JOIN CLIENT ON(scadenze.CLIENTE_0 = client.CODCLIFAT_0 AND client.CODCLIORD_0=client.CODCLIFAT_0) ';
+        sql:=sql+'WHERE CODAGENTE_0 IN ('+sub_agenti+') ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        nomeTabella:='ecp2';
+        sql:='SELECT NUM_FAT_0 AS CodiceFattura, CLIENTE_0 AS CodiceCliente, DAT_SCAD_0 AS DataScadenza, ';
+        sql:=sql+'IF(REPLACE(IMP_RATA_0,",",".")*100>0, REPLACE(IMP_RATA_0,",",".")*100, REPLACE(IMP_RATA_0,",",".")*-100) AS Importo, DES_PAG_0 AS Nota, TIPO_PAG_0 AS CodicePagamento, ';
+        sql:=sql+'"" AS Nota2, "" AS Nota3, "" AS Nota4, "" AS nota5, DAT_FATT_0 AS dataUltimoIncasso, "" AS Ordinamento, "" AS dataGenerica, ';
+        sql:=sql+'MID(DAT_FATT_0,1,4) AS AnnoFattura, IF(REPLACE(IMP_RATA_0,",",".")*100>=0,0,1) AS IncassoFlag, STATO_0 as Stato, ';
+        sql:=sql+'CONCAT( ';
+        //gestione stringhe EC in lingua (tradotte manualmente via query)
+        sql:=sql+'  CASE 	WHEN NOTA_0="FATTURA" AND (NAZIONEFAT_0="DE" OR NAZIONEFAT_0="AT") THEN "RECHNUNG" ';
+        sql:=sql+'  WHEN NOTA_0="FATTURA" THEN "FATTURA" ';
+        sql:=sql+'  WHEN NOTA_0="NOTA ACCREDITO" AND (NAZIONEFAT_0="DE" OR NAZIONEFAT_0="AT") THEN "GUTSCHRIFT" ';
+        sql:=sql+'  WHEN NOTA_0="NOTA ACCREDITO" THEN "NOTA ACCREDITO" ';
+        sql:=sql+'  END ';
+        sql:=sql+', ":  ", NUM_FAT_0)  AS DescrizioneFattura, ';
+        sql:=sql+'"'+ts+'" as DataEsportazione, ';
+        //sql:=sql+'ROUND(REPLACE(TOT_FATT_0,",",".")*100,0) AS ImportoFattura ';
+        sql:=sql+'IF((TOT_FATT_0 - 0) < 0, ROUND(REPLACE(TOT_FATT_0,",",".")*100,0) * (-1), ROUND(REPLACE(TOT_FATT_0,",",".")*100,0)) AS ImportoFattura ';
+        sql:=sql+'FROM scadenze ';
+        sql:=sql+'JOIN CLIENT ON(scadenze.CLIENTE_0 = client.CODCLIFAT_0 AND client.CODCLIORD_0=client.CODCLIFAT_0) ';
+        sql:=sql+'WHERE CODAGENTE_0 IN('+sub_agenti+') ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //causali
+        nomeTabella:='causali';
+        sql:='select "V" as CodiceCausale, "Vendita" as DescrizioneCausale, 1 as FlagValorizzazione, 1 as ValorizzazionePrezzo ';
+        sql:=sql+'UNION ';
+        sql:=sql+'select "O" as CodiceCausale, "Omaggio" as DescrizioneCausale, 1 as FlagValorizzazione, 0 as ValorizzazionePrezzo ';
+        sql:=sql+'UNION ';
+        sql:=sql+'select "S" as CodiceCausale, "Sconto M." as DescrizioneCausale, 1 as FlagValorizzazione, 0 as ValorizzazionePrezzo ';
+        sql:=sql+'UNION ';
+        sql:=sql+'select "A" as CodiceCausale, "Sconto M. [P]" as DescrizioneCausale, 1 as FlagValorizzazione, 0 as ValorizzazionePrezzo ';
+        sql:=sql+'UNION ';
+        sql:=sql+'select "B" as CodiceCausale, "Omaggio [P]" as DescrizioneCausale, 1 as FlagValorizzazione, 0 as ValorizzazionePrezzo ';
+        sql:=sql+'UNION ';
+        sql:=sql+'select "C" as CodiceCausale, "Tester [P]" as DescrizioneCausale, 1 as FlagValorizzazione, 0 as ValorizzazionePrezzo ';
+        sql:=sql+'UNION ';
+        sql:=sql+'select "D" as CodiceCausale, "Camp. [P]" as DescrizioneCausale, 1 as FlagValorizzazione, 0 as ValorizzazionePrezzo ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //predocl1
+        nomeTabella:='predocl1';
+        //tipi ordini standard....
+        sql:='SELECT DISTINCT tipiord.TIPOORD_0 AS codiceLivello1, COALESCE(descord.DESCTIPO_0, tipiord.DESC_ORD_0) AS descrizioneLivello, IF(DATACONSIM_0<>"" AND DATACONSIM_0>"'+ts+'",DATACONSIM_0, LEADTIME_0) as giorniScadenza, IF(FLAGPROMO_0=2,1,0) as flagPromo, NAZIONE_0 AS Nazione, ORDINA_0 as Ordinamento, codpag_0 as codicePagamento, ';
+        sql:=sql+'Scaglione1_0 as Scaglione1, Scaglione2_0 as Scaglione2, Scaglione3_0 as Scaglione3, Scaglione4_0 as Scaglione4, coalesce(Capienza1_0,0) as Capienza1, coalesce(Capienza2_0,0) as Capienza2, coalesce(Capienza3_0,0) as Capienza3, coalesce(Capienza4_0,0) as Capienza4, ';
+        sql:=sql+'EnableAllAgent AS EnableAllAgent ';
+        sql:=sql+'FROM tipiord JOIN copiecomm ON(copiecomm.TIPOORD_0=tipiord.TIPOORD_0 AND INIZIO_VAL_0<="'+ts+'" AND FINE_VAL_0>="'+ts+'" ) ';
+        sql:=sql+'JOIN tmp_predoc_abilitazionevendita_agent ON(copiecomm.TIPOORD_0=tmp_predoc_abilitazionevendita_agent.TIPOORD_0) ';
+        sql:=sql+'LEFT JOIN descord ON(tipiord.TIPOORD_0 = descord.TIPOORD_0 AND descord.LINGUA_0="'+lingua+'" ) ';
+        sql:=sql+'WHERE FLAGPROMO_0 = 1 ';
+        //2017.11.08 Federico+: Esportazione solo record con sacglione not null e capinza > 0
+        sql:=sql+'AND ((Scaglione1_0 IS NULL AND Scaglione2_0 IS NULL AND Scaglione3_0 IS NULL AND Scaglione4_0 IS NULL) OR (Scaglione1_0 IS NOT NULL AND COALESCE(Capienza1_0,0) > 0) OR (Scaglione2_0 IS NOT NULL AND COALESCE(Capienza2_0,0) > 0) OR (Scaglione3_0 IS NOT NULL AND COALESCE(Capienza3_0,0) > 0) OR (Scaglione4_0 IS NOT NULL AND COALESCE(Capienza4_0,0) > 0)) ';
+        //2017.11.08 Fine
+        //...promozioni
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT DISTINCT tipiord.TIPOORD_0 AS codiceLivello1, COALESCE(descord.DESCTIPO_0, tipiord.DESC_ORD_0) AS descrizioneLivello, IF(DATACONSIM_0<>"" AND DATACONSIM_0>"'+ts+'",DATACONSIM_0, LEADTIME_0) as giorniScadenza, IF(FLAGPROMO_0=2,1,0) as flagPromo, promozioni.NAZIONE_0 AS Nazione, ORDINA_0 as Ordinamento, codpag_0 as codicePagamento, ';
+        sql:=sql+'Scaglione1_0 as Scaglione1, Scaglione2_0 as Scaglione2, Scaglione3_0 as Scaglione3, Scaglione4_0 as Scaglione4, coalesce(Capienza1_0,0) as Capienza1, coalesce(Capienza2_0,0) as Capienza2, coalesce(Capienza3_0,0) as Capienza3, coalesce(Capienza4_0,0) as Capienza4, ';
+        sql:=sql+'EnableAllAgent AS EnableAllAgent ';
+        sql:=sql+'FROM tipiord ';
+        sql:=sql+'JOIN tmp_predoc_abilitazionevendita_agent ON(tipiord.TIPOORD_0=tmp_predoc_abilitazionevendita_agent.TIPOORD_0) ';
+        sql:=sql+'JOIN promozioni ON(tipiord.TIPOORD_0 = promozioni.TIPORPADRE_0) ';
+        sql:=sql+'LEFT JOIN descord ON(tipiord.TIPOORD_0 = descord.TIPOORD_0 AND descord.LINGUA_0="'+lingua+'" ) ';
+        sql:=sql+'WHERE FLAGPROMO_0 = 2 ';
+        //2017.11.08 Federico+: Esportazione solo record con sacglione not null e capinza > 0
+        sql:=sql+'AND ((Scaglione1_0 IS NULL AND Scaglione2_0 IS NULL AND Scaglione3_0 IS NULL AND Scaglione4_0 IS NULL) OR (Scaglione1_0 IS NOT NULL AND COALESCE(Capienza1_0,0) > 0) OR (Scaglione2_0 IS NOT NULL AND COALESCE(Capienza2_0,0) > 0) OR (Scaglione3_0 IS NOT NULL AND COALESCE(Capienza3_0,0) > 0) OR (Scaglione4_0 IS NOT NULL AND COALESCE(Capienza4_0,0) > 0)) ';
+        //2017.11.08 Fine
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //livello2
+        //TODO: mostrare solo i record attivi (data validità)
+        nomeTabella:='livello2';
+        sql:='SELECT DISTINCT TIPOORD_0 AS linea, LINEACATAL_0 AS codiceLivello2, ';
+        sql:=sql+'(SELECT DESLINEAC_0 FROM lineecat WHERE LINEACATAL_0 = codiceLivello2  AND LINGUA_0 = "'+lingua+'" LIMIT 1) AS descrizioneLivello, ';
+        sql:=sql+'(SELECT ORDINAMENT_0 FROM lineecat WHERE LINEACATAL_0 = codiceLivello2  AND LINGUA_0 = "'+lingua+'" LIMIT 1) AS Ordinamento ';
+        sql:=sql+'FROM copiecomm ';
+        sql:=sql+'WHERE INIZIO_VAL_0<="'+ts+'" AND FINE_VAL_0>="'+ts+'" AND FLAGESCVEND_0 != 2 ';
+
+        sql:=sql+'UNION ';
+
+        sql:=sql+'SELECT  ';
+        sql:=sql+'Linea, ';
+        sql:=sql+'CodiceLivello2, ';
+        sql:=sql+'DescrizioneLivello, ';
+        sql:=sql+'"000" AS Ordinamento ';
+        sql:=sql+'FROM livello2_promo ';
+        sql:=sql+'WHERE (DateStart <= REPLACE(CURDATE(),"-","") OR DateStart = "") ';
+        sql:=sql+'AND (DateEnd >= REPLACE(CURDATE(),"-","") OR DateEnd = "") ';
+        sql:=sql+'AND (CodiceAgente IN ('+sub_agenti+') OR  CodiceAgente="") ';
+        sql:=sql+'AND (((CodiceCliente,  CodiceSpedizione) IN (SELECT CODCLIFAT_0, CODCLIORD_0 FROM CLIENT WHERE CODAGENTE_0 IN ('+sub_agenti+'))) OR (CodiceCliente="" AND CodiceSpedizione ="")) ';
+
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //livello1
+        //20130808 Non esporto i codici POA in quanto contiene solo articoli promozionali non vendibili direttamente
+        nomeTabella:='livello1';
+        sql:='SELECT DISTINCT ';
+        sql:=sql+'TIPOORD_0 AS linea, ';
+        sql:=sql+'LINEACATAL_0  AS codiceLivello2, ';
+        sql:=sql+'CATEGCATAL_0 AS codiceLivello1, ';
+        sql:=sql+'(SELECT DESCATEGC_0  FROM categcat WHERE CATEGCATAL_0 = codiceLivello1  AND LINGUA_0 = "'+lingua+'" LIMIT 1) AS descrizioneLivello, ';
+        sql:=sql+'0 AS PromoFlag, ';
+        sql:=sql+'"" AS TipoFiltroApplicabilita, ';
+        sql:=sql+'"" AS ValoreFiltroApplicabilita, ';
+        sql:=sql+'"" AS CodiceCliente, ';
+        sql:=sql+'"" AS CodiceSpedizione, ';
+        sql:=sql+'"" AS FiltroClienti ';
+        sql:=sql+'FROM copiecomm ';
+        sql:=sql+'WHERE INIZIO_VAL_0<="'+ts+'" AND FINE_VAL_0>="'+ts+'" AND CATEGCATAL_0 <> "POA" AND FLAGESCVEND_0 != 2 ';
+
+        sql:=sql+'UNION ';
+
+        sql:=sql+'SELECT ';
+        sql:=sql+'Linea, ';
+        sql:=sql+'CodiceLivello2, ';
+        sql:=sql+'codiceLivello1, ';
+        sql:=sql+'DescrizioneLivello, ';
+        sql:=sql+'PromoFlag, ';
+        sql:=sql+'TipoFiltroApplicabilita, ';
+        sql:=sql+'ValoreFiltroApplicabilita, ';
+        sql:=sql+'CodiceCliente, ';
+        sql:=sql+'CodiceSpedizione, ';
+        sql:=sql+'FiltroClienti ';
+        sql:=sql+'FROM livello1_promo ';
+        sql:=sql+'WHERE (DateStart <= REPLACE(CURDATE(),"-","") OR DateStart = "") ';
+        sql:=sql+'AND (DateEnd >= REPLACE(CURDATE(),"-","") OR DateEnd = "") ';
+        sql:=sql+'AND (CodiceAgente IN ('+sub_agenti+') OR  CodiceAgente="") ';
+        sql:=sql+'AND (((CodiceCliente,  CodiceSpedizione) IN (SELECT CODCLIFAT_0, CODCLIORD_0 FROM CLIENT WHERE CODAGENTE_0 IN ('+sub_agenti+'))) OR (CodiceCliente="" AND CodiceSpedizione ="")) ';
+
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //prodotti
+        nomeTabella:='prodotti';
+        sql:='SELECT DISTINCT  copiecomm.CATEGCATAL_0 AS codiceLivello1, articoli.CODART_0 AS codiceArticolo, COALESCE(descart.DESCART_0, articoli.DESC1ART_0) AS descrizioneProdotto, COALESCE(descart.DESCART2_0, articoli.DESC2ART_0) AS DescrizioneAggiuntiva, ';
+        sql:=sql+'copiecomm.TIPOORD_0 AS linea, ';
+        sql:=sql+'UDV_0 AS udm1, UDV_0 AS udm2, UDV_0 AS udm3, "SC1" AS udm4, ';
+        sql:=sql+'pxc_0 AS pxc1, pxc_0 AS pxc2, pxc_0 AS pxc3, pz_conf_0 AS pxc4, ';
+        sql:=sql+'IF(QMUL_0>1,QMUL_0,1) as QtaMultipla, ';
+
+        sql:=sql+'CONV( ';
+        sql:=sql+'8 ';
+        sql:=sql+'+ IF(FLAGCAMP_0="2",4,0) ';
+        sql:=sql+'+ IF(FLAGTESTER_0="2",2,0) ';
+        sql:=sql+'+ IF(YFLGVENSC1_0="2",1,0) ';
+        sql:=sql+',10,16) AS flagAbilitazione, ';
+
+        //sql:=sql+'IF(FLAGCAMP_0="1" AND FLAGTESTER_0="1", "8", ';
+        //sql:=sql+'IF(FLAGCAMP_0="2" AND FLAGTESTER_0="1", "C", ';
+        //sql:=sql+'IF(FLAGCAMP_0="1" AND FLAGTESTER_0="2", "A", ';
+        //sql:=sql+'IF(FLAGCAMP_0="2" AND FLAGTESTER_0="2", "E","8" ';
+        //sql:=sql+')))) AS flagAbilitazione, ';
+
+
+        sql:=sql+'0 AS prezzo1, 0 AS prezzo2, 0 AS prezzo3, 0 AS prezzo4, ';
+        sql:=sql+'0 AS sconto1_1, 0 AS sconto1_2, 0 AS sconto1_3, 0 AS sconto1_4, ';
+        sql:=sql+'0 AS sconto2_1, 0 AS sconto2_2, 0 AS sconto2_3, 0 AS sconto2_4, ';
+        sql:=sql+'0 AS sconto3_1, 0 AS sconto3_2, 0 AS sconto3_3, 0 AS sconto3_4, ';
+        sql:=sql+'IF(FLAGSCOPER_0 = "2" AND FLAGPRZBLO_0 = "2", "4", ';
+        sql:=sql+'    IF(FLAGSCOPER_0 = "2" AND FLAGPRZBLO_0 = "1", "C", ';
+        sql:=sql+'        IF(FLAGSCOPER_0 = "1" AND FLAGPRZBLO_0 = "2", "0", "8"))) AS flagNetto, ';                   //modifico solo prezzo o prezzo/sconto1
+        sql:=sql+'FLAGOMAGGI_0 as FlagOmaggio, ';     //abilita la causale Omaggio
+        sql:=sql+'FLAGSCONTO_0 as FlagScontoMerce, '; //abilita la causale ScontoMerce
+        sql:=sql+'IF(FLAGSCOPER_0 = "2" AND SOTTOLINEA_0 <> "", SOTTOLINEA_0, "-") as CategoriaSconto, ';    //se non posso modificare lo sconto, non gestisco catsconti
+        sql:=sql+'INIZIO_VAL_0 as DataInizioValidita, DATE_FORMAT(ADDDATE(STR_TO_DATE(FINE_VAL_0,"%Y%m%d"), INTERVAL 1 DAY),"%Y%m%d") AS DataFineValidita, ';
+        sql:=sql+'articoli.EANCODE_0 as CodiceEan, ';
+        sql:=sql+'IF(MANCANTE_0=1,"",1) AS imgIndex, ';
+        sql:=sql+'articoli.QMAX_0 as qtaMax, ';
+        sql:=sql+'copiecomm.ORDINAMENT_0 as Ordinamento, ';
+
+        sql:=sql+'IF (FLAGESCVEND_0 !=2, ';
+        sql:=sql+'CONV( ';
+        sql:=sql+'8 ';
+        sql:=sql+'+ IF(FLAGCAMP_0="2",4,0) ';
+        sql:=sql+'+ IF(FLAGTESTER_0="2",2,0) ';
+        sql:=sql+'+ IF(YFLGVENSC1_0="2",1,0) ';
+        sql:=sql+',10,16), ';
+        sql:=sql+'0) AS FlagCella, ';
+
+        sql:=sql+'IF (tipiord.FLAGDINAM_0 = 2, 1, 2) AS FlagVendita ';
+
+        sql:=sql+'FROM articoli ';
+        sql:=sql+'JOIN copiecomm ON(articoli.CODART_0 = copiecomm.CODART_0) ';
+        sql:=sql+'LEFT JOIN descart ON(articoli.CODART_0=descart.CODART_0 AND LINGUA_0="'+lingua+'") ';
+	    sql:=sql+'JOIN tipiord ON tipiord.TIPOORD_0 = copiecomm.TIPOORD_0 ';
+        sql:=sql+'WHERE INIZIO_VAL_0<="'+ts+'" AND FINE_VAL_0>="'+ts+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //Promozioni (in append a prodotti)
+        nomeTabella:='prodotti';
+        sql:='SELECT DISTINCT  "" AS codiceLivello1, articoli.CODART_0 AS codiceArticolo, COALESCE(descart.DESCART_0, articoli.DESC1ART_0) AS descrizioneProdotto, COALESCE(descart.DESCART2_0, articoli.DESC2ART_0) AS DescrizioneAggiuntiva, ';
+        sql:=sql+'promozioni.TIPORPADRE_0 AS linea, ';
+        sql:=sql+'promozioni.UDV_0 AS udm1, promozioni.UDV_0 AS udm2, promozioni.UDV_0 AS udm3, promozioni.UDV_0 AS udm4, ';
+        //sql:=sql+'promozioni.QMUL_0 AS pxc1, promozioni.QMUL_0 AS pxc2, promozioni.QMUL_0 AS pxc3, promozioni.QMUL_0 AS pxc4, ';
+        sql:=sql+'pxc_0 AS pxc1, pxc_0 AS pxc2, pxc_0 AS pxc3, pxc_0 AS pxc4, ';
+        sql:=sql+'IF(promozioni.QMUL_0>1,promozioni.QMUL_0,1) as QtaMultipla, ';
+        sql:=sql+'"8" as flagAbilitazione, ';            //solo prima cella per le promozioni
+        sql:=sql+'REPLACE(promozioni.PREZZO_0,",",".")*100 AS prezzo1, REPLACE(promozioni.PREZZO_0,",",".")*100 AS prezzo2, REPLACE(promozioni.PREZZO_0,",",".")*100 AS prezzo3, REPLACE(promozioni.PREZZO_0,",",".")*100 AS prezzo4, ';
+        sql:=sql+'0 AS sconto1_1, 0 AS sconto1_2, 0 AS sconto1_3, 0 AS sconto1_4, ';
+        sql:=sql+'0 AS sconto2_1, 0 AS sconto2_2, 0 AS sconto2_3, 0 AS sconto2_4, ';
+        sql:=sql+'0 AS sconto3_1, 0 AS sconto3_2, 0 AS sconto3_3, 0 AS sconto3_4, ';
+        sql:=sql+'"0" AS flagNetto, ';              //non modifico prezzo o sconti in promo
+        sql:=sql+'"1" as FlagOmaggio, ';            //nessun omaggio nelle promo
+        sql:=sql+'"1" as FlagScontoMerce, ';        //nessun ScontoMerce nelle promo
+        sql:=sql+'"-" as CategoriaSconto, ';        //nessuna cat sconto per le promo
+        sql:=sql+'"" as DataInizioValidita, "" as DataFineValidita, ';
+        sql:=sql+'articoli.EANCODE_0 as CodiceEan, ';
+        sql:=sql+'IF(MANCANTE_0=1,"",1) AS imgIndex, ';
+        sql:=sql+'articoli.QMAX_0 as qtaMax, ';
+        sql:=sql+'promozioni.TIPOORD_0 as Ordinamento, ';
+
+        sql:=sql+'"8" as FlagCella, ';            //solo prima cella per le promozioni
+        sql:=sql+'"2" AS FlagVendita ';
+
+        sql:=sql+'FROM promozioni ';
+        sql:=sql+'JOIN articoli ON (articoli.CODART_0 = promozioni.CODART_0) ';
+        sql:=sql+'LEFT JOIN descart ON(articoli.CODART_0=descart.CODART_0 AND LINGUA_0="'+lingua+'") ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,false,ieftAutomatic);
+
+        nomeTabella:='attributi_prodotti';
+        sql:='SELECT ';
+        sql:=sql+'attributi_prodotti.CODART_0 AS CodiceArticolo, ';
+        sql:=sql+'copiecomm.TIPOORD_0 AS Linea, ';
+        sql:=sql+'COALESCE(attributi_prodotti_natura.DESCRIZ_0, attributi_prodotti.NATURA_0) AS Natura, ';
+        sql:=sql+'COALESCE(attributi_prodotti_sottonatura.DESCRIZ_0, attributi_prodotti.SOTTONATURA_0) AS SottoNatura, ';
+        sql:=sql+'COALESCE(attributi_prodotti_ioc.DESCRIZ_0, attributi_prodotti.IOC_0) AS Classificazione, ';
+        sql:=sql+'"NT" AS FissoGestioneIpad '; //FISSO AD NT perchè gestisce l'ipad secondo la tabella cli_pro
+        sql:=sql+'FROM attributi_prodotti ';
+        sql:=sql+'LEFT JOIN attributi_prodotti_natura ON attributi_prodotti.NATURA_0 = attributi_prodotti_natura.NATURA_0 AND attributi_prodotti_natura.LINGUA_0="'+lingua+'" ';
+        sql:=sql+'LEFT JOIN attributi_prodotti_sottonatura ON attributi_prodotti.SOTTONATURA_0 = attributi_prodotti_sottonatura.SOTTONATURA_0 AND attributi_prodotti_sottonatura.LINGUA_0="'+lingua+'" ';
+        sql:=sql+'LEFT JOIN attributi_prodotti_ioc ON attributi_prodotti.IOC_0 = attributi_prodotti_ioc.IOC_0 AND attributi_prodotti_ioc.LINGUA_0="'+lingua+'" ';
+        sql:=sql+'JOIN articoli ON attributi_prodotti.CODART_0 = articoli.CODART_0 ';
+        sql:=sql+'JOIN copiecomm ON articoli.CODART_0 = copiecomm.CODART_0 ';
+        sql:=sql+'JOIN tipiord ON tipiord.TIPOORD_0 = copiecomm.TIPOORD_0 ';
+        sql:=sql+'WHERE INIZIO_VAL_0<="'+ts+'" AND FINE_VAL_0>="'+ts+'" ';
+
+        sql:=sql+'UNION '
+
+        sql:=sql+'SELECT ';
+        sql:=sql+'attributi_prodotti.CODART_0 AS CodiceArticolo, ';
+        sql:=sql+'promozioni.TIPORPADRE_0 AS Linea, ';
+        sql:=sql+'COALESCE(attributi_prodotti_natura.DESCRIZ_0, attributi_prodotti.NATURA_0) AS Natura, ';
+        sql:=sql+'COALESCE(attributi_prodotti_sottonatura.DESCRIZ_0, attributi_prodotti.SOTTONATURA_0) AS SottoNatura, ';
+        sql:=sql+'COALESCE(attributi_prodotti_ioc.DESCRIZ_0, attributi_prodotti.IOC_0) AS Classificazione, ';
+        sql:=sql+'"NT" AS FissoGestioneIpad ';
+        sql:=sql+'FROM attributi_prodotti ';
+        sql:=sql+'LEFT JOIN attributi_prodotti_natura ON attributi_prodotti.NATURA_0 = attributi_prodotti_natura.NATURA_0 AND attributi_prodotti_natura.LINGUA_0="'+lingua+'" ';
+        sql:=sql+'LEFT JOIN attributi_prodotti_sottonatura ON attributi_prodotti.SOTTONATURA_0 = attributi_prodotti_sottonatura.SOTTONATURA_0 AND attributi_prodotti_sottonatura.LINGUA_0="'+lingua+'" ';
+        sql:=sql+'LEFT JOIN attributi_prodotti_ioc ON attributi_prodotti.IOC_0 = attributi_prodotti_ioc.IOC_0 AND attributi_prodotti_ioc.LINGUA_0="'+lingua+'" ';
+        sql:=sql+'JOIN promozioni ON attributi_prodotti.CODART_0 = promozioni.CODART_0 ';
+        sql:=sql+'JOIN articoli ON (articoli.CODART_0 = promozioni.CODART_0) ';
+
+       // AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,false,ieftAutomatic);     //lorenzo
+
+        //Prodotti esclusivi (in append a prodotti)
+        nomeTabella:='prodotti_esclusivi';
+        sql:='SELECT tmp_prodotti_esclusivi.* ';
+        sql:=sql+'FROM tmp_prodotti_esclusivi ';
+        sql:=sql+'JOIN CLIENT ON tmp_prodotti_esclusivi.CodiceCliente = CLIENT.CODCLIFAT_0 AND tmp_prodotti_esclusivi.CodiceSpedizione = CLIENT.CODCLIORD_0 ';
+        sql:=sql+'WHERE CODAGENTE_0 IN ('+sub_agenti+') ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,false,ieftAutomatic);
+
+        //causali ritiri
+        nomeTabella:='causaliritiri';
+        sql:='select * from causaliritiri where LINGUA_0 = "'+lingua+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //led su catalogo (refnocat non bloccante)
+        nomeTabella:='refnocat';
+        sql:='select distinct ';
+        sql:=sql+'articoli.CODART_0 AS codiceArticolo, ';
+        sql:=sql+'TIPOORD_0 AS linea, ';
+        sql:=sql+'"../../html/images/imgIndex_1.png" AS imgPath, ';
+        sql:=sql+'0 AS bloccaClick ';
+        sql:=sql+'FROM articoli ';
+        sql:=sql+'JOIN copiecomm ON(articoli.CODART_0 = copiecomm.CODART_0) ';
+        sql:=sql+'WHERE MANCANTE_0=2 AND INIZIO_VAL_0<="'+ts+'" AND FINE_VAL_0>="'+ts+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //righel
+        nomeTabella:='righel';
+        sql:='SELECT CODLISTINO_0 AS codiceListino, CODART_0 AS codiceArticolo, REPLACE(PREZZO_0,",",".")*100 AS prezzo1, COALESCE(REPLACE(PREZZO_SC1_0,",",".")*100,0) AS prezzo4, ';
+        sql:=sql+'INIZIO_VAL_0 as DataInizioValidita, DATE_FORMAT(ADDDATE(STR_TO_DATE(FINE_VAL_0,"%Y%m%d"), INTERVAL 1 DAY),"%Y%m%d") AS DataFineValidita ';
+        sql:=sql+'FROM listini ';
+        sql:=sql+'WHERE INIZIO_VAL_0<="'+ts+'" AND FINE_VAL_0>="'+ts+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //catsconti
+        nomeTabella:='catsconti';
+        sql:='SELECT CODCLIENTE_0 AS CategoriaCliente, SOTTOLINEA_0 AS CategoriaSconto, PERC_SC_0*10 AS Sconto1_1, PERC_SC_0*10 AS Sconto1_2, PERC_SC_0*10 AS Sconto1_3, PERC_SC_0*10 AS Sconto1_4, ';
+        sql:=sql+'INIZIO_VAL_0 as DataInizioValidita, DATE_FORMAT(ADDDATE(STR_TO_DATE(FINE_VAL_0,"%Y%m%d"), INTERVAL 1 DAY),"%Y%m%d") AS DataFineValidita ';
+        sql:=sql+'FROM righescon ';
+        sql:=sql+'WHERE INIZIO_VAL_0<="'+ts+'" AND FINE_VAL_0>="'+ts+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //cli_pro (usato per le informazioni BI ordinato cliente/articolo)
+        nomeTabella:='cli_pro';
+        sql:='SELECT DISTINCT ';
+        sql:=sql+'"" AS linea, ';
+        sql:=sql+'ybi_ordini.CODCLIFAT_0 AS CodiceCliente, ';
+        sql:=sql+'ybi_ordini.CODART_0 AS CodiceArticolo, ';
+        sql:=sql+'QTA_TOT_0 AS bi_qta_tot, ';
+        sql:=sql+'QTA_MEDIA_0 AS bi_qta_media, ';
+        sql:=sql+'QTA_PORTAF_0 AS bi_qta_port ';
+        sql:=sql+'FROM ybi_ordini ';
+        sql:=sql+'JOIN copiecomm ON(ybi_ordini.CODART_0 = copiecomm.CODART_0) ';
+        sql:=sql+'JOIN CLIENT ON(ybi_ordini.CODCLIFAT_0 = client.CODCLIFAT_0) ';
+        sql:=sql+'WHERE CODAGENTE_0 IN ('+sub_agenti+') ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //promozioni agenti (articoli in scontoMerce/Omaggio per qta venduta)
+        nomeTabella:='promoordini';
+        sql:='SELECT ';
+        sql:=sql+'NAZIONE_0 AS Nazione, ';
+        sql:=sql+'TIPOORD_0 AS Linea, ';
+        sql:=sql+'INIZIO_VAL_0 AS DataInizioValidita, ';
+        sql:=sql+'FINE_VAL_0 AS DataFineValidita, ';
+        sql:=sql+'CODART_ORD_0 AS CodiceArticolo, ';
+        sql:=sql+'QTA_ORDINE_0 AS QtaOrdine, ';
+        sql:=sql+'CODART_PR_0 AS CodiceArticoloPromo, ';
+        sql:=sql+'SCOMER_OMA_0 AS FlagScOm, ';
+        sql:=sql+'QTA_PROMO_0 AS QtaPromo, ';
+        sql:=sql+'FLAG_PERC_0 AS flagPerc ';
+        sql:=sql+'FROM promoordini ';
+        sql:=sql+'WHERE FINE_VAL_0 >= "'+ts+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //ordini saldati
+        nomeTabella:='ordinisaldati';
+        sql:='SELECT TIPOORD_0 AS Linea, ITMREF_0 AS CodiceArticolo, MID(BPCORD_0,1,7) AS codiceCliente, BPCORD_0 AS CodiceSpedizione, ';
+        sql:=sql+'QTY_0 AS qta, CCLREN_0 AS causale, ORDDAT_0 AS dataOrdine, DISCRGVAL1_0*10 AS sconto ';
+        sql:=sql+'FROM ordinisaldati ';
+        sql:=sql+'JOIN  CLIENT ON(client.CODCLIORD_0=ordinisaldati.BPCORD_0) ';
+        sql:=sql+'WHERE client.CODAGENTE_0="'+codice_base+'" ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+        sql:=sql+' UNION ';
+        sql:=sql+' SELECT "", "", "", "", "", "", "", "" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+        //controllo
+        //statistiche ordini in errore
+        nomeTabella:='statOrdiniErrore';
+        sql:='SELECT 2 AS provenienza,ordinierrore.TIPOORD_0 AS CodicePredocL1,DESCORD.DESCTIPO_0 AS DescrizionePredocl1 , NUMORD_0 AS numeroDoc, NUMORD_0 AS numeroDocSede, DATACREAZ_0 AS dataDoc, DATACONRIC_0 AS dataConsegna, ordinierrore.CODCLIFAT_0 AS codiceCliente, ordinierrore.CODCLIORD_0 AS codiceDestinazione, RAGSOCO1RD_0 AS RagioneSociale, ';
+        sql:=sql+'ROUND(SUM(REPLACE(IMPORTO_0,",",".")*100)) AS importoTotale, ';
+        sql:=sql+'SUM(QTA_VEN_0+QTA_SCM_0+QTA_OMA_0+QTA_CMP_0+QTA_TES_0) AS qtaOrd1, ';
+        sql:=sql+'0 AS qtaEvasa1, ';
+        sql:=sql+'0 AS QtaAnn1, ';
+        sql:=sql+'0 AS qtaOrd2, 0 AS qtaEvasa2, 0 AS QtaAnn2, ';
+        sql:=sql+'0 AS qtaOrd3, 0 AS qtaEvasa3, 0 AS QtaAnn3, ';
+        sql:=sql+'0 AS qtaOrd4, 0 AS qtaEvasa4, 0 AS QtaAnn4 ';
+        sql:=sql+'FROM ordinierrore ';
+        sql:=sql+'left join descord on(ordinierrore.TIPOORD_0 = descord.TIPOORD_0 and descord.LINGUA_0="'+lingua+'") ';
+        sql:=sql+'JOIN CLIENT ON(ordinierrore.CODCLIORD_0=client.CODCLIORD_0 AND ordinierrore.CODCLIFAT_0=client.CODCLIFAT_0) ';
+        sql:=sql+'WHERE ordinierrore.CODAGENTE_0 IN('+sub_agenti+') ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND CLIENT.NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+        sql:=sql+'GROUP BY NUMORD_0, ordinierrore.TIPOORD_0, DATACREAZ_0 ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //dettaglio ordini in errore
+        nomeTabella:='dettOrdiniErrore';
+        sql:='SELECT 2 AS Provenienza, ordinierrore.CODAGENTE_0 AS codiceAgente, NUMORD_0 AS numeroDoc, DATACREAZ_0 AS DataDoc, ';
+        sql:=sql+'ordinierrore.CODART_0 AS codiceArticolo, ';
+        sql:=sql+'COALESCE(descart.DESCART_0, ordinierrore.DESCART_0) AS DescrizioneProdotto, ';
+        sql:=sql+'"" AS CodiceCausale, ';
+        sql:=sql+'DATACONRIC_0 AS dataConsegna_1, ROUND(REPLACE(PREZZO_0,",",".")*100) AS prezzo_1, (QTA_VEN_0+QTA_SCM_0+QTA_OMA_0+QTA_CMP_0+QTA_TES_0) AS QuantitaOrd_1, 0 AS QuantitaEvasa_1, 0 AS QuantitaAnnullata_1, UM_0 AS udm_1, ';
+        sql:=sql+'"" AS dataConsegna_2, 0 AS prezzo_2, 0 AS QuantitaOrd_2, 0 AS QuantitaEvasa_2, 0 AS QuantitaAnnullata_2, "" AS udm_2, ';
+        sql:=sql+'"" AS dataConsegna_3, 0 AS prezzo_3, 0 AS QuantitaOrd_3, 0 AS QuantitaEvasa_3, 0 AS QuantitaAnnullata_3, "" AS udm_3, ';
+        sql:=sql+'"" AS dataConsegna_4, 0 AS prezzo_4, 0 AS QuantitaOrd_4, 0 AS QuantitaEvasa_4, 0 AS QuantitaAnnullata_4, "" AS udm_4, ';
+        sql:=sql+'0 AS sconto1_1, 0 AS sconto2_1, 0 AS sconto3_1, ';
+        sql:=sql+'0 AS sconto1_2, 0 AS sconto2_2, 0 AS sconto3_2, ';
+        sql:=sql+'0 AS sconto1_3, 0 AS sconto2_3, 0 AS sconto3_3, ';
+        sql:=sql+'0 AS sconto1_4, 0 AS sconto2_4, 0 AS sconto3_4 ';
+        sql:=sql+'FROM ordinierrore ';
+        sql:=sql+'LEFT  JOIN descart ON(descart.CODART_0=ordinierrore.CODART_0 AND descart.LINGUA_0="'+lingua+'") ';
+        sql:=sql+'JOIN CLIENT ON(ordinierrore.CODCLIORD_0=client.CODCLIORD_0 AND ordinierrore.CODCLIFAT_0=client.CODCLIFAT_0) ';
+        sql:=sql+'WHERE ordinierrore.CODAGENTE_0 IN('+sub_agenti+') ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND CLIENT.NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //statistiche ordini aperti
+        nomeTabella:='statOrdiniAperti';
+        sql:='SELECT 2 AS provenienza,ordiniaperti.TIPOORD_0 AS CodicePredocL1,DESCORD.DESCTIPO_0 AS DescrizionePredocl1 , NUMORD_0 AS numeroDoc, NUMORD_0 AS numeroDocSede, DATAORD_0 AS dataDoc, DATACONRIC_0 AS dataConsegna, ordiniaperti.CODCLIFAT_0 AS codiceCliente, ordiniaperti.CODCLIORD_0 as codiceDestinazione, ordiniaperti.RAGSOC1ORD_0 as RagioneSociale, ';
+        sql:=sql+'IF(UDV_0 = "SC1", ROUND(SUM(REPLACE(PREZZONETT_0,",",".")*100)),ROUND(SUM(QTA_ORD_0*REPLACE(PREZZONETT_0,",",".")*100))) AS importoTotale, ';
+        sql:=sql+'SUM(QTA_ORD_0) AS qtaOrd1, ';
+        sql:=sql+'SUM(QTA_ORD_0-QTA_RIM_0) AS qtaEvasa1, ';
+        sql:=sql+'0 AS QtaAnn1, ';
+        sql:=sql+'0 AS qtaOrd2, 0 AS qtaEvasa2, 0 AS QtaAnn2, ';
+        sql:=sql+'0 AS qtaOrd3, 0 AS qtaEvasa3, 0 AS QtaAnn3, ';
+        sql:=sql+'0 AS qtaOrd4, 0 AS qtaEvasa4, 0 AS QtaAnn4 ';
+        sql:=sql+'FROM ordiniaperti ';
+        sql:=sql+'left join descord on(ordiniaperti.TIPOORD_0 = descord.TIPOORD_0 and descord.LINGUA_0="'+lingua+'") ';
+        sql:=sql+'JOIN CLIENT ON(ordiniaperti.CODCLIORD_0=client.CODCLIORD_0 AND ordiniaperti.CODCLIFAT_0=client.CODCLIFAT_0) ';
+        sql:=sql+'WHERE ordiniaperti.CODAGENTE_0 IN('+sub_agenti+') ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND CLIENT.NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+        sql:=sql+'GROUP BY NUMORD_0, ordiniaperti.TIPOORD_0, DATAORD_0 ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //dettaglio ordini aperti
+        nomeTabella:='dettOrdiniAperti';
+        sql:='SELECT 2 as Provenienza, ordiniaperti.CODAGENTE_0 AS codiceAgente, NUMORD_0 AS numeroDoc, DATAORD_0 as DataDoc, ';
+        sql:=sql+'ordiniaperti.CODART_0 AS codiceArticolo, ';
+        sql:=sql+'COALESCE(descart.DESCART_0, ordiniaperti.DESC1ART_0) AS DescrizioneProdotto, ';
+        sql:=sql+'ORIGINE_0 AS CodiceCausale, ';
+        sql:=sql+'DATACONRIC_0 AS dataConsegna_1, IF(UDV_0 = "SC1", ROUND((REPLACE(PREZZONETT_0,",",".")*100)/QTA_ORD_0),ROUND(REPLACE(PREZZONETT_0,",",".")*100)) AS prezzo_1, QTA_ORD_0 AS QuantitaOrd_1, (QTA_ORD_0-QTA_RIM_0) AS QuantitaEvasa_1, 0 AS QuantitaAnnullata_1, UDV_0 AS udm_1, ';
+        sql:=sql+'"" AS dataConsegna_2, 0 AS prezzo_2, 0 AS QuantitaOrd_2, 0 AS QuantitaEvasa_2, 0 AS QuantitaAnnullata_2, UDV_0 AS udm_2, ';
+        sql:=sql+'"" AS dataConsegna_3, 0 AS prezzo_3, 0 AS QuantitaOrd_3, 0 AS QuantitaEvasa_3, 0 AS QuantitaAnnullata_3, UDV_0 AS udm_3, ';
+        sql:=sql+'"" AS dataConsegna_4, 0 AS prezzo_4, 0 AS QuantitaOrd_4, 0 AS QuantitaEvasa_4, 0 AS QuantitaAnnullata_4, UDV_0 AS udm_4, ';
+        sql:=sql+'0 AS sconto1_1, 0 AS sconto2_1, 0 AS sconto3_1, ';
+        sql:=sql+'0 AS sconto1_2, 0 AS sconto2_2, 0 AS sconto3_2, ';
+        sql:=sql+'0 AS sconto1_3, 0 AS sconto2_3, 0 AS sconto3_3, ';
+        sql:=sql+'0 AS sconto1_4, 0 AS sconto2_4, 0 AS sconto3_4 ';
+        sql:=sql+'FROM ordiniaperti ';
+        sql:=sql+'LEFT  JOIN descart ON(descart.CODART_0=ordiniaperti.CODART_0 AND descart.LINGUA_0="'+lingua+'") ';
+        sql:=sql+'JOIN CLIENT ON(ordiniaperti.CODCLIORD_0=client.CODCLIORD_0 AND ordiniaperti.CODCLIFAT_0=client.CODCLIFAT_0) ';
+        sql:=sql+'WHERE ordiniaperti.CODAGENTE_0 IN('+sub_agenti+') ';
+        //per gli utenti della gerarchia, esporto solo nazioni coerenti con il loro prefisso (es. DE_F00024 vede solo cliente DE)
+        if flagGerarchia then sql:=sql+' AND CLIENT.NAZIONEFAT_0 = "'+nazione_gerarchia+'" ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+        //Promozioni standard Nexttech
+        //Promo
+        nomeTabella:='promo';
+        sql:='SELECT DISTINCT ';
+        sql:=sql+'CONCAT("P__",CodPromo) AS CodPromo, ';
+        sql:=sql+'CodCanvas, ';
+        sql:=sql+'CONCAT("C__",CodCategory) AS CodCategory, ';
+        sql:=sql+'promo.status, ';
+        sql:=sql+'promo_canvas.DateStart, ';
+        sql:=sql+'IF(promo_canvas.DateEnd<>"",DATE_FORMAT((STR_TO_DATE(promo_canvas.DateEnd, "%Y%m%d") + INTERVAL 1 DAY),"%Y%m%d"),"") AS DateEnd, ';
+        sql:=sql+'PromoDescription, ';
+        sql:=sql+'COALESCE(MaxMultiplier, 1) AS Multiplier, ';
+        sql:=sql+'ClientFilterJSON, ';
+        sql:=sql+'ClientFilterSQL, ';
+        sql:=sql+'AgentFilterJSON, ';
+        sql:=sql+'AgentFilterSQL, ';
+        sql:=sql+'ReferenceMin, ';
+        sql:=sql+'NumRefMax AS ReferenceMax, ';
+        sql:=sql+'QtyMin, ';
+        sql:=sql+'QtyMax, ';
+        sql:=sql+'AmountMin, ';
+        sql:=sql+'AmountMax, ';
+        sql:=sql+'PointsMin, ';
+        sql:=sql+'PointsMax, ';
+        sql:=sql+'Custom1, ';
+        sql:=sql+'Custom2, ';
+        sql:=sql+'Custom3 ';
+        sql:=sql+'FROM promo ';
+        sql:=sql+'JOIN promo_agenti ON(promo_agenti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'JOIN promo_clienti ON(promo_clienti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'JOIN promo_canvas USING(CodCanvas) ';
+        sql:=sql+'WHERE promo_canvas.status = 1 AND promo.status = 1 ';
+        sql:=sql+'AND (promo_canvas.DateStart <= REPLACE(CURDATE(),"-","") OR promo_canvas.DateStart = "") ';
+        sql:=sql+'AND (promo_canvas.DateEnd >= REPLACE(CURDATE(),"-","") OR promo_canvas.DateEnd = "") ';
+        sql:=sql+'AND (promo_agenti.CodiceAgente IN ('+sub_agenti+') OR  promo_agenti.CodiceAgente="") ';
+        sql:=sql+'AND (((promo_clienti.CodiceCliente,  promo_clienti.CodiceSpedizione) IN (SELECT CODCLIFAT_0, CODCLIORD_0 FROM CLIENT WHERE CODAGENTE_0 IN ('+sub_agenti+'))) OR (promo_clienti.CodiceCliente="" AND promo_clienti.CodiceSpedizione ="")) ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+	    
+        //promo_canvass
+        nomeTabella:='promo_canvass';
+        sql:='SELECT ';
+        sql:=sql+'CodCanvas, ';
+        sql:=sql+'CanvasDescription, ';
+        sql:=sql+'promo_canvas.DateStart AS DateStart, ';
+        sql:=sql+'IF(promo_canvas.DateEnd<>"",DATE_FORMAT((STR_TO_DATE(promo_canvas.DateEnd, "%Y%m%d") + INTERVAL 1 DAY),"%Y%m%d"),"") AS DateEnd, ';
+        sql:=sql+'OrgCom, ';
+        sql:=sql+'Linea ';
+        sql:=sql+'FROM promo_canvas ';
+        sql:=sql+'JOIN promo USING(CodCanvas) ';
+        sql:=sql+'JOIN promo_agenti ON(promo_agenti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'JOIN promo_clienti ON(promo_clienti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'WHERE promo_canvas.Status = 1 AND (promo_canvas.DateStart <= REPLACE(CURDATE(),"-","") OR promo_canvas.DateStart = "") ';
+        sql:=sql+'AND (promo_canvas.DateEnd >= REPLACE(CURDATE(),"-","") OR promo_canvas.DateEnd = "") ';
+        sql:=sql+'AND (promo_agenti.CodiceAgente IN ('+sub_agenti+') OR  promo_agenti.CodiceAgente="") ';
+        sql:=sql+'AND (((promo_clienti.CodiceCliente,  promo_clienti.CodiceSpedizione) IN (SELECT CODCLIFAT_0, CODCLIORD_0 FROM CLIENT WHERE CODAGENTE_0 IN ('+sub_agenti+'))) OR (promo_clienti.CodiceCliente="" AND promo_clienti.CodiceSpedizione ="")) ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+	    
+        //promo_category
+        nomeTabella:='promo_category';
+        sql:='SELECT ';
+        sql:=sql+'CONCAT("C__",promo_category.CodCategory) AS CodCategory, ';
+        sql:=sql+'CodCanvas, ';
+        sql:=sql+'CategoryDescription ';
+        sql:=sql+'FROM promo_category ';
+        sql:=sql+'JOIN promo_canvas USING(CodCanvas) ';
+        sql:=sql+'JOIN promo USING(CodCanvas) ';
+        sql:=sql+'JOIN promo_agenti ON(promo_agenti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'JOIN promo_clienti ON(promo_clienti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'WHERE promo_canvas.Status = 1 AND (promo_canvas.DateStart <= REPLACE(CURDATE(),"-","") OR promo_canvas.DateStart = "") ';
+        sql:=sql+'AND (promo_canvas.DateEnd >= REPLACE(CURDATE(),"-","") OR promo_canvas.DateEnd = "") ';
+        sql:=sql+'AND (promo_agenti.CodiceAgente IN ('+sub_agenti+') OR  promo_agenti.CodiceAgente="") ';
+        sql:=sql+'AND (((promo_clienti.CodiceCliente,  promo_clienti.CodiceSpedizione) IN (SELECT CODCLIFAT_0, CODCLIORD_0 FROM CLIENT WHERE CODAGENTE_0 IN ('+sub_agenti+'))) OR (promo_clienti.CodiceCliente="" AND promo_clienti.CodiceSpedizione ="")) ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+	    
+        //promo_group
+        nomeTabella:='promo_group';
+        sql:='SELECT ';
+        sql:=sql+'CodGroup, ';
+        sql:=sql+'CONCAT("P__",promo_group.CodPromo) AS CodPromo, ';
+        sql:=sql+'CodCluster, ';
+        sql:=sql+'GroupDescription, ';
+        sql:=sql+'GroupType, ';
+        sql:=sql+'promo_group.ReferenceMin AS ReferenceMin, ';
+        sql:=sql+'ReferenceMax, ';
+        sql:=sql+'promo_group.QtyMin AS QtyMin, ';
+        sql:=sql+'promo_group.QtyMax AS QtyMax, ';
+        sql:=sql+'promo_group.AmountMin AS AmountMin, ';
+        sql:=sql+'promo_group.AmountMax AS AmountMax, ';
+        sql:=sql+'promo_group.PointsMin AS PointsMin, ';
+        sql:=sql+'promo_group.PointsMax AS PointsMax, ';
+        sql:=sql+'FlagLock, ';
+        sql:=sql+'GroupSpecificDataJson, ';
+        sql:=sql+'promo_group.Custom1, ';
+        sql:=sql+'promo_group.Custom2, ';
+        sql:=sql+'promo_group.Custom3, ';
+        sql:=sql+'promo_group.Custom4, ';
+        sql:=sql+'promo_group.Custom5, ';
+        sql:=sql+'"" AS DescrizioneAggiuntiva, ';
+        sql:=sql+'promo_group.CheckReferenceMin AS CheckReferenceMin, ';
+        sql:=sql+'promo_group.CheckReferenceMax AS CheckReferenceMax, ';
+        sql:=sql+'promo_group.CheckQtyMin AS CheckQtyMin  , ';
+        sql:=sql+'promo_group.CheckQtyMax AS CheckQtyMax, ';
+        sql:=sql+'promo_group.CheckAmountMin AS CheckAmountMin, ';
+        sql:=sql+'promo_group.CheckAmountMax AS CheckAmountMax, ';
+        sql:=sql+'promo_group.CheckPointsMin AS CheckPointsMin, ';
+        sql:=sql+'promo_group.CheckPointsMax AS CheckPointsMax ';
+        sql:=sql+'FROM promo_group ';
+        sql:=sql+'JOIN promo USING(CodPromo) ';
+        sql:=sql+'JOIN promo_canvas USING(CodCanvas) ';
+        sql:=sql+'JOIN promo_agenti ON(promo_agenti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'JOIN promo_clienti ON(promo_clienti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'WHERE promo_canvas.Status = 1 AND promo.Status = 1 ';
+        sql:=sql+'AND (promo_canvas.DateStart <= REPLACE(CURDATE(),"-","") OR promo_canvas.DateStart = "") ';
+        sql:=sql+'AND (promo_canvas.DateEnd >= REPLACE(CURDATE(),"-","") OR promo_canvas.DateEnd = "") ';
+        sql:=sql+'AND (promo_agenti.CodiceAgente IN ('+sub_agenti+') OR  promo_agenti.CodiceAgente="") ';
+        sql:=sql+'AND (((promo_clienti.CodiceCliente,  promo_clienti.CodiceSpedizione) IN (SELECT CODCLIFAT_0, CODCLIORD_0 FROM CLIENT WHERE CODAGENTE_0 IN ('+sub_agenti+'))) OR (promo_clienti.CodiceCliente="" AND promo_clienti.CodiceSpedizione ="")) ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+	    
+        //promo_group
+        nomeTabella:='promo_group_item';
+        sql:='SELECT ';
+        sql:=sql+'promo_group_item.CodGroup, ';
+        sql:=sql+'CodItem, ';
+        sql:=sql+'Points,  ';
+        sql:=sql+'QtyDefault, ';
+        sql:=sql+'promo_group_item.QtyMin, ';
+        sql:=sql+'promo_group_item.QtyMax, ';
+        sql:=sql+'Price_1, ';
+        sql:=sql+'Discount_1, ';
+        sql:=sql+'Discount_2, ';
+        sql:=sql+'Discount_3,  ';
+        sql:=sql+'promo_group_item.Custom1, ';
+        sql:=sql+'promo_group_item.Custom2, ';
+        sql:=sql+'promo_group_item.Custom3, ';
+        sql:=sql+'promo_group_item.Custom4, ';
+        sql:=sql+'promo_group_item.Custom5, ';
+	      sql:=sql+'IF(QMUL_0>1 AND promo_group.GroupType = 0,QMUL_0,1) AS Pxc ';
+        sql:=sql+'FROM promo_group_item ';
+        sql:=sql+'JOIN promo_group USING(CodGroup) ';
+        sql:=sql+'JOIN promo USING(CodPromo) ';
+        sql:=sql+'JOIN promo_canvas USING(CodCanvas) ';
+        sql:=sql+'JOIN promo_agenti ON(promo_agenti.CodicePromo = promo.CodPromo) ';
+        sql:=sql+'JOIN promo_clienti ON(promo_clienti.CodicePromo = promo.CodPromo) ';
+	      sql:=sql+'LEFT JOIN articoli ON articoli.CODART_0 = promo_group_item.CodItem ';
+        sql:=sql+'WHERE promo_canvas.Status = 1 AND promo.Status = 1 ';
+        sql:=sql+'AND (promo_canvas.DateStart <= REPLACE(CURDATE(),"-","") OR promo_canvas.DateStart = "") ';
+        sql:=sql+'AND (promo_canvas.DateEnd >= REPLACE(CURDATE(),"-","") OR promo_canvas.DateEnd = "") ';
+        sql:=sql+'AND (promo_agenti.CodiceAgente IN ('+sub_agenti+') OR  promo_agenti.CodiceAgente="") ';
+        sql:=sql+'AND (((promo_clienti.CodiceCliente,  promo_clienti.CodiceSpedizione) IN (SELECT CODCLIFAT_0, CODCLIORD_0 FROM CLIENT WHERE CODAGENTE_0 IN ('+sub_agenti+'))) OR (promo_clienti.CodiceCliente="" AND promo_clienti.CodiceSpedizione ="")) ';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+      end;
+      //2016.04.15 Fine
+
+      //2019.03.21 Federico+: Esportazione ordini farmacia e b2b solo agli agenti con la giusta provenineza
+      //L'associazione agente cliente viene ricavta dalla tabella clientiagenti
+      sql:='SELECT "0" AS Provenienza ';
+      sql:=sql+'UNION ';
+      sql:=sql+'SELECT CodiceSubAgente as Provenienza FROM agenti_subagenti WHERE codiceAgente="'+codiceAgente+'" ';
+      sql:=sql+'ORDER BY Provenienza DESC ';
+      rec.sql.text:=sql;
+      rec.open;
+      while not rec.eof do begin
+        provenienza:=trim(rec.FieldByName('Provenienza').asstring);
+        //destDirSource:=GetToPalmExportDestinationSourceDirPath(codiceAgente,provenienza);
+        destLastExpDirSource:=GetToPalmExportTempDestinationSourceDirPath(codiceAgente,provenienza);
+
+        //2016.02.23+ Federico
+        //esporto ordini diretti tabella indocmaster
+        //esporto ordini provenienti dal B2B da approvare
+        nomeTabella:='indocmaster';
+        sql:='SELECT DISTINCT SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1) AS NumeroDoc, testataordinidiretti.DataOrdine AS DataDoc, MIN(righeordinidiretti.DataConsegnaRichiesta) AS DataConsegna, ';
+        sql:=sql+'testataordinidiretti.ClienteOrdine AS CodiceDestinazione, client.CODCLIFAT_0 AS CodiceCliente, client.CODPAGORD_0 AS CodicePagamento, client.CODLISTORD_0 AS CodiceListino, ';
+        sql:=sql+'client.RAGSOC1FAT_0 AS RagioneSociale,client.INDIR1FAT_0 AS Indirizzo, client.CITTAFAT_0 AS Citta, client.CAPFAT_0 AS CAP, client.PROVFAT_0 AS Provincia,client.INDIR1ORD_0 AS IndirizzoSped, client.CITTAORD_0 AS CittaDest, ';
+        sql:=sql+'client.CAPORD_0 AS CAPDest, client.PROVORD_0 AS ProvinciaDest, client.DESPAGORD_0 AS DescrizionePag, SUM(righeordinidiretti.Importo)*100 AS ImportoTotale, "4" AS CodiceInvio, ';
+        sql:=sql+'testataordinidiretti.Listino AS CodicePreDocL1, "9" AS Provenienza, testataordinidiretti.CodiceAgente AS CodiceAgente, client.RAGSOC1ORD_0 AS RagioneSocialeDest, SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-1) AS CustomParam, testataordinidiretti.IdOrdineFarmacia AS CustomParam1 ';
+        sql:=sql+'FROM testataordinidiretti ';
+        sql:=sql+'INNER JOIN CLIENT ON client.CODCLIORD_0 = testataordinidiretti.ClienteOrdine ';
+        sql:=sql+'INNER JOIN righeordinidiretti ON righeordinidiretti.NumeroMovimento = testataordinidiretti.NumeroMovimento ';
+        sql:=sql+FORMAT('WHERE ((client.CODCLIFAT_0,testataordinidiretti.ClienteOrdine) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        if flagGerarchia then
+          sql:=sql+FORMAT('OR testataordinidiretti.CodiceAgente = "%s" ',[codiceAgente]);
+        sql:=sql+FORMAT(') AND testataordinidiretti.testataordinidiretti_EXPORTED_ = %d AND ',[gEXPORTEDFLAG_GESTTOBA]);
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT numerodoc,DataDoc,codiceagente FROM docmaster WHERE provenienza = "9") AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT CustomParam1,CustomParam2,codiceagente FROM docregvisita WHERE CustomParam3 = "9" and CodiceEsito = "ED") ';
+        sql:=sql+'GROUP BY NumeroDoc,DataDoc,CodiceAgente,Provenienza ';
+
+        sql:=sql+'UNION ';
+
+        sql:=sql+'SELECT NumeroDoc, DataDoc, DataConsegna, CodiceDestinazione, CodiceCliente, CodicePagamento, CodiceListino, RagioneSociale, Indirizzo, Citta, CAP, ';
+        sql:=sql+'Provincia,IndirizzoSped, CittaDest, CAPDest, ProvinciaDest, DescrizionePag, ImportoTotale, "6" AS CodiceInvio, CodicePreDocL1, Provenienza, CodiceAgente, RagioneSocialeDest, CustomParam, CustomParam1 ';
+        sql:=sql+'FROM docmaster_b2b ';
+        sql:=sql+'JOIN CLIENT ON client.CODCLIORD_0 = docmaster_b2b.CodiceCliente AND client.CODCLIFAT_0=docmaster_b2b.CodiceDestinazione AND client.CODAGENTE_0=docmaster_b2b.CodiceAgente ';
+        sql:=sql+FORMAT('WHERE (client.CODCLIFAT_0,client.CODCLIORD_0) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        sql:=sql+FORMAT('AND docmaster_b2b_EXPORTED_ = %d ',[gEXPORTEDFLAG_GESTTOBA]);
+
+        if db.HaveRecords(sql) then
+          AddFileToExport(db,destLastExpDirSource+'indocmaster.txt.iup.'+GetTimeStamp(),gToPalm_export_defsDir+'indocmaster.def',sql,'indocmaster',params,true,ieftAutomatic);
+
+        //Solo per funzionario, esporto lo storico ordini iPad dei subagenti (solo gli ultmi 30 giorni se schedulato)  e se sono in modalita' FULLSYNC
+        if (flagGerarchia and (opType = gFULLSYNC)) then begin
+          //DocMaster
+          sql:=Format('select 1 as CodiceInvio, '''' as numeroDocSede, '''' as NotaDocDefault, docmaster.* from docmaster JOIN CLIENT ON(docmaster.codiceCliente=client.CODCLIFAT_0 AND docmaster.codiceDestinazione=client.CODCLIORD_0) where codiceagente IN(%s) and NAZIONEFAT_0 = "%s"  ',[sub_agenti, nazione_gerarchia]);
+          sql:=sql+'AND codiceAgente<>"'+codiceAgente+'" AND datadoc > MID(ADDDATE(NOW(),INTERVAL -2 YEAR)+0,1,8) ';       //ultimi 2 anni in fullExport
+          if not fullExport then sql:=sql+' AND docmaster.datadoc > MID(ADDDATE(NOW(),INTERVAL -30 DAY)+0,1,8) ';          //ultimi 30 gg in export schedulato
+
+          if db.HaveRecords(sql) then
+            AddFileToExport(db,destLastExpDirSource+'indocmaster.txt.iup.'+GetTimeStamp(),gToPalm_export_defsDir+'indocmaster.def',sql,'indocmaster',params,false,ieftAutomatic);
+        end;
+
+        //esporto ordini diretti tabella indocdetails
+        //esporto ordini provenienti dal B2B da approvare
+        nomeTabella:='indocdetails';
+        sql:='SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1) AS NumeroDoc, testataordinidiretti.DataOrdine AS DataDoc, "9" AS Provenienza, testataordinidiretti.CodiceAgente AS CodiceAgente, ';
+        sql:=sql+'righeordinidiretti.CODART_0 AS CodiceArticolo, righeordinidiretti.DescrizioneArticolo AS DescrizioneProdotto, "V" AS CodiceCausale, ';
+        sql:=sql+'righeordinidiretti.Prezzo*100 AS Prezzo_1, righeordinidiretti.Sconto*10 AS Sconto1_1, "0" AS Sconto2_1, "0" AS Sconto3_1, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_1, righeordinidiretti.Vendita AS QuantitaOrd_1, articoli.PXC_0 AS PezziCartone_1, ';
+        sql:=sql+'"0" AS Prezzo_2, "0" AS Sconto1_2, "0" AS Sconto2_2, "0" AS Sconto3_2, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_2, righeordinidiretti.Campione AS QuantitaOrd_2, articoli.PXC_0 AS PezziCartone_2, ';
+        sql:=sql+'"0" AS Prezzo_3, "0" AS Sconto1_3, "0" AS Sconto2_3, "0" AS Sconto3_3, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_3, righeordinidiretti.Tester AS QuantitaOrd_3, articoli.PXC_0 AS PezziCartone_3, ';
+        sql:=sql+'"0" AS Prezzo_4, "0" AS Sconto1_4, "0" AS Sconto2_4, "0" AS Sconto3_4, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_4, "0" AS QuantitaOrd_4, articoli.pz_conf_0 AS PezziCartone_4 ';
+        sql:=sql+'FROM righeordinidiretti ';
+        sql:=sql+'INNER JOIN testataordinidiretti ON testataordinidiretti.NumeroMovimento = righeordinidiretti.NumeroMovimento ';
+        sql:=sql+'INNER JOIN CLIENT ON client.CODCLIORD_0 = testataordinidiretti.ClienteOrdine ';
+        sql:=sql+'INNER JOIN articoli ON articoli.CODART_0 = righeordinidiretti.CODART_0 ';
+        sql:=sql+FORMAT('WHERE ((client.CODCLIFAT_0,testataordinidiretti.ClienteOrdine) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        if flagGerarchia then
+          sql:=sql+FORMAT('OR testataordinidiretti.CodiceAgente = "%s" ',[codiceAgente]);
+        sql:=sql+FORMAT(') AND testataordinidiretti.testataordinidiretti_EXPORTED_ = %d AND ',[gEXPORTEDFLAG_GESTTOBA]);
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT numerodoc,DataDoc,codiceagente FROM docmaster WHERE provenienza = "9") AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT CustomParam1,CustomParam2,codiceagente FROM docregvisita WHERE CustomParam3 = "9" and CodiceEsito = "ED") ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1) AS NumeroDoc, testataordinidiretti.DataOrdine AS DataDoc, "9" AS Provenienza, testataordinidiretti.CodiceAgente AS CodiceAgente, ';
+        sql:=sql+'righeordinidiretti.CODART_0 AS CodiceArticolo, righeordinidiretti.DescrizioneArticolo AS DescrizioneProdotto, "O" AS CodiceCausale, ';
+        sql:=sql+'righeordinidiretti.Prezzo*100 AS Prezzo_1, "0" AS Sconto1_1, "0" AS Sconto2_1, "0" AS Sconto3_1, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_1, righeordinidiretti.Omaggio AS QuantitaOrd_1, articoli.PXC_0 AS PezziCartone_1, ';
+        sql:=sql+'"0" AS Prezzo_2, "0" AS Sconto1_2, "0" AS Sconto2_2, "0" AS Sconto3_2, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_2, "0" AS QuantitaOrd_2, articoli.PXC_0 AS PezziCartone_2, ';
+        sql:=sql+'"0" AS Prezzo_3, "0" AS Sconto1_3, "0" AS Sconto2_3, "0" AS Sconto3_3, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_3, "0" AS QuantitaOrd_3, articoli.PXC_0 AS PezziCartone_3, ';
+        sql:=sql+'"0" AS Prezzo_4, "0" AS Sconto1_4, "0" AS Sconto2_4, "0" AS Sconto3_4, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_4, "0" AS QuantitaOrd_4, articoli.pz_conf_0 AS PezziCartone_4 ';
+        sql:=sql+'FROM righeordinidiretti ';
+        sql:=sql+'INNER JOIN testataordinidiretti ON testataordinidiretti.NumeroMovimento = righeordinidiretti.NumeroMovimento ';
+        sql:=sql+'INNER JOIN CLIENT ON client.CODCLIORD_0 = testataordinidiretti.ClienteOrdine ';
+        sql:=sql+'INNER JOIN articoli ON articoli.CODART_0 = righeordinidiretti.CODART_0 ';
+        sql:=sql+FORMAT('WHERE ((client.CODCLIFAT_0,testataordinidiretti.ClienteOrdine) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        if flagGerarchia then
+          sql:=sql+FORMAT('OR testataordinidiretti.CodiceAgente = "%s" ',[codiceAgente]);
+        sql:=sql+FORMAT(') AND testataordinidiretti.testataordinidiretti_EXPORTED_ = %d AND ',[gEXPORTEDFLAG_GESTTOBA]);
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT numerodoc,DataDoc,codiceagente FROM docmaster WHERE provenienza = "9") AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT CustomParam1,CustomParam2,codiceagente FROM docregvisita WHERE CustomParam3 = "9" and CodiceEsito = "ED") ';
+        sql:=sql+'UNION ';
+        sql:=sql+'SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1) AS NumeroDoc, testataordinidiretti.DataOrdine AS DataDoc, "9" AS Provenienza, testataordinidiretti.CodiceAgente AS CodiceAgente, ';
+        sql:=sql+'righeordinidiretti.CODART_0 AS CodiceArticolo, righeordinidiretti.DescrizioneArticolo AS DescrizioneProdotto, "S" AS CodiceCausale, ';
+        sql:=sql+'righeordinidiretti.Prezzo*100 AS Prezzo_1, "0" AS Sconto1_1, "0" AS Sconto2_1, "0" AS Sconto3_1, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_1, righeordinidiretti.ScontoM AS QuantitaOrd_1, articoli.PXC_0 AS PezziCartone_1, ';
+        sql:=sql+'"0" AS Prezzo_2, "0" AS Sconto1_2, "0" AS Sconto2_2, "0" AS Sconto3_2, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_2, "0" AS QuantitaOrd_2, articoli.PXC_0 AS PezziCartone_2, ';
+        sql:=sql+'"0" AS Prezzo_3, "0" AS Sconto1_3, "0" AS Sconto2_3, "0" AS Sconto3_3, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_3, "0" AS QuantitaOrd_3, articoli.PXC_0 AS PezziCartone_3, ';
+        sql:=sql+'"0" AS Prezzo_4, "0" AS Sconto1_4, "0" AS Sconto2_4, "0" AS Sconto3_4, righeordinidiretti.DataConsegnaRichiesta AS DataConsegna_4, "0" AS QuantitaOrd_4, articoli.pz_conf_0 AS PezziCartone_4 ';
+        sql:=sql+'FROM righeordinidiretti ';
+        sql:=sql+'INNER JOIN testataordinidiretti ON testataordinidiretti.NumeroMovimento = righeordinidiretti.NumeroMovimento ';
+        sql:=sql+'INNER JOIN CLIENT ON client.CODCLIORD_0 = testataordinidiretti.ClienteOrdine ';
+        sql:=sql+'INNER JOIN articoli ON articoli.CODART_0 = righeordinidiretti.CODART_0 ';
+        sql:=sql+FORMAT('WHERE ((client.CODCLIFAT_0,testataordinidiretti.ClienteOrdine) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        if flagGerarchia then
+          sql:=sql+FORMAT('OR testataordinidiretti.CodiceAgente = "%s" ',[codiceAgente]);
+        sql:=sql+FORMAT(') AND testataordinidiretti.testataordinidiretti_EXPORTED_ = %d AND ',[gEXPORTEDFLAG_GESTTOBA]);
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT numerodoc,DataDoc,codiceagente FROM docmaster WHERE provenienza = "9") AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT CustomParam1,CustomParam2,codiceagente FROM docregvisita WHERE CustomParam3 = "9" and CodiceEsito = "ED") ';
+
+        sql:=sql+'UNION ';
+
+        sql:=sql+'SELECT docdetails_b2b.NumeroDoc, docdetails_b2b.DataDoc, docdetails_b2b.Provenienza, docdetails_b2b.CodiceAgente, CodiceArticolo, DescrizioneProdotto, CodiceCausale, ';
+        sql:=sql+'Prezzo_1, Sconto1_1, Sconto2_1, Sconto3_1, DataConsegna_1, QuantitaOrd_1, PezziCartone_1, Prezzo_2, Sconto1_2, Sconto2_2, Sconto3_2, DataConsegna_2, QuantitaOrd_2, PezziCartone_2, ';
+        sql:=sql+'Prezzo_3, Sconto1_3, Sconto2_3, Sconto3_3, DataConsegna_3, QuantitaOrd_3, PezziCartone_3, Prezzo_4, Sconto1_4, Sconto2_4, Sconto3_4, DataConsegna_4, QuantitaOrd_4, PezziCartone_4 ';
+        sql:=sql+'FROM docdetails_b2b ';
+        sql:=sql+'JOIN docmaster_b2b ON docdetails_b2b.CodiceAgente=docmaster_b2b.CodiceAgente AND docdetails_b2b.NumeroDoc=docmaster_b2b.NumeroDoc AND docdetails_b2b.DataDoc=docmaster_b2b.DataDoc AND docdetails_b2b.Provenienza=docmaster_b2b.Provenienza ';
+        sql:=sql+'JOIN CLIENT ON client.CODCLIORD_0 = docmaster_b2b.CodiceCliente AND client.CODCLIFAT_0=docmaster_b2b.CodiceDestinazione AND client.CODAGENTE_0=docmaster_b2b.CodiceAgente ';
+        sql:=sql+FORMAT('WHERE (client.CODCLIFAT_0,client.CODCLIORD_0) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        sql:=sql+FORMAT('AND docmaster_b2b_EXPORTED_ = %d ',[gEXPORTEDFLAG_GESTTOBA]);
+
+        if db.HaveRecords(sql) then
+          AddFileToExport(db,destLastExpDirSource+'indocdetails.txt.iup.'+GetTimeStamp(),gToPalm_export_defsDir+'indocdetails.def',sql,'indocdetails',params,true,ieftAutomatic);
+
+        //esporto ordini diretti tabella indocnotes
+        //esporto ordini provenienti dal B2B da approvare
+        nomeTabella:='indocnotes';
+        sql:='SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(NumeroMovimento,"_",-2),"_",1) AS NumeroDoc, DataOrdine AS DataDoc, "9" AS Provenienza, CodiceAgente AS CodiceAgente, "0" AS IndiceNota, NoteTestataOrdine AS NotaOrdine ';
+        sql:=sql+'FROM testataordinidiretti ';
+         sql:=sql+'INNER JOIN CLIENT ON client.CODCLIORD_0 = testataordinidiretti.ClienteOrdine ';
+        sql:=sql+FORMAT('WHERE ((client.CODCLIFAT_0,testataordinidiretti.ClienteOrdine) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        if flagGerarchia then
+          sql:=sql+FORMAT('OR testataordinidiretti.CodiceAgente = "%s" ',[codiceAgente]);
+        sql:=sql+FORMAT(') AND testataordinidiretti.testataordinidiretti_EXPORTED_ = %d AND ',[gEXPORTEDFLAG_GESTTOBA]);
+        sql:=sql+'NoteTestataOrdine != "" AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT numerodoc,DataDoc,codiceagente FROM docmaster WHERE provenienza = "9") AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT CustomParam1,CustomParam2,codiceagente FROM docregvisita WHERE CustomParam3 = "9" and CodiceEsito = "ED") ';
+        sql:=sql+'UNION SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(NumeroMovimento,"_",-2),"_",1) AS NumeroDoc, DataOrdine AS DataDoc, "9" AS Provenienza, CodiceAgente AS CodiceAgente, "1" AS IndiceNota, NotePiedeOrdine AS NotaOrdine ';
+        sql:=sql+'FROM testataordinidiretti ';
+         sql:=sql+'INNER JOIN CLIENT ON client.CODCLIORD_0 = testataordinidiretti.ClienteOrdine ';
+        sql:=sql+FORMAT('WHERE ((client.CODCLIFAT_0,testataordinidiretti.ClienteOrdine) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        if flagGerarchia then
+          sql:=sql+FORMAT('OR testataordinidiretti.CodiceAgente = "%s" ',[codiceAgente]);
+        sql:=sql+FORMAT(') AND testataordinidiretti.testataordinidiretti_EXPORTED_ = %d AND ',[gEXPORTEDFLAG_GESTTOBA]);
+        sql:=sql+'NotePiedeOrdine != "" AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT numerodoc,DataDoc,codiceagente FROM docmaster WHERE provenienza = "9") AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT CustomParam1,CustomParam2,codiceagente FROM docregvisita WHERE CustomParam3 = "9" and CodiceEsito = "ED") ';
+
+        sql:=sql+'UNION ';
+
+        sql:=sql+'SELECT docnotes_b2b.NumeroDoc, docnotes_b2b.DataDoc, docnotes_b2b.Provenienza, docnotes_b2b.CodiceAgente, IndiceNota, NotaOrdine ';
+        sql:=sql+'FROM docnotes_b2b ';
+        sql:=sql+'JOIN docmaster_b2b ON docnotes_b2b.CodiceAgente=docmaster_b2b.CodiceAgente AND docnotes_b2b.NumeroDoc=docmaster_b2b.NumeroDoc AND docnotes_b2b.DataDoc=docmaster_b2b.DataDoc AND docnotes_b2b.Provenienza=docmaster_b2b.Provenienza ';
+        sql:=sql+'JOIN CLIENT ON client.CODCLIORD_0 = docmaster_b2b.CodiceCliente AND client.CODCLIFAT_0=docmaster_b2b.CodiceDestinazione AND client.CODAGENTE_0=docmaster_b2b.CodiceAgente ';
+        sql:=sql+FORMAT('WHERE (client.CODCLIFAT_0,client.CODCLIORD_0) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]); 
+        sql:=sql+FORMAT('AND docmaster_b2b_EXPORTED_ = %d ',[gEXPORTEDFLAG_GESTTOBA]);
+
+        if db.HaveRecords(sql) then
+          AddFileToExport(db,destLastExpDirSource+'indocnotes.txt.iup.'+GetTimeStamp(),gToPalm_export_defsDir+'indocnotes.def',sql,'indocnotes',params,true,ieftAutomatic);
+
+        //esporto anomalie ordini diretti
+        nomeTabella:='anomalieOrdiniDiretti';
+        sql:='SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1) AS NumeroDoc, DataOrdine AS DataDoc, "9" AS Provenienza, CodiceAgente AS CodiceAgente, OrdinamentoNota AS IndiceNota, DescrizioneNotaAnomalia AS NotaAnomaliaOrdine ';
+        sql:=sql+'FROM noteanomalieordinidiretti ';
+        sql:=sql+'INNER JOIN testataordinidiretti ON testataordinidiretti.NumeroMovimento = noteanomalieordinidiretti.NumeroMovimento ';
+        sql:=sql+'INNER JOIN CLIENT ON client.CODCLIORD_0 = testataordinidiretti.ClienteOrdine ';
+        sql:=sql+FORMAT('WHERE ((client.CODCLIFAT_0,testataordinidiretti.ClienteOrdine) IN (SELECT CodiceCliente,CodiceSpedizione FROM clientiagenti WHERE CodiceAgente = "%s" AND Provenienza = "%s") ',[codice_base,provenienza]);
+        if flagGerarchia then
+          sql:=sql+FORMAT('OR testataordinidiretti.CodiceAgente = "%s" ',[codiceAgente]);
+        sql:=sql+FORMAT(') AND testataordinidiretti.testataordinidiretti_EXPORTED_ = %d AND ',[gEXPORTEDFLAG_GESTTOBA]);
+        sql:=sql+'NoteTestataOrdine != "" AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT numerodoc,DataDoc,codiceagente FROM docmaster WHERE provenienza = "9") AND ';
+        sql:=sql+'(SUBSTRING_INDEX(SUBSTRING_INDEX(testataordinidiretti.NumeroMovimento,"_",-2),"_",1),testataordinidiretti.DataOrdine,testataordinidiretti.CodiceAgente) NOT IN (';
+        sql:=sql+'SELECT CustomParam1,CustomParam2,codiceagente FROM docregvisita WHERE CustomParam3 = "9" and CodiceEsito = "ED") ';
+
+        if db.HaveRecords(sql) then
+          AddFileToExport(db,destLastExpDirSource+'anomalieOrdiniDiretti.txt.iup.'+GetTimeStamp(),gToPalm_export_defsDir+'anomalieOrdiniDiretti.def',sql,'anomalieOrdiniDiretti',params,true,ieftAutomatic);
+
+        //2016.02.23 End
+        rec.next;
+      end;
+      rec.close;
+
+      //2016.04.15+ Federico esportazione solo ordini farmacia
+      if ((opType = gFULLSYNC) or (opType = gONLYPROMOSYNC)) then
+      begin
+        //2016.02.16+ Federico
+        //esporto comunicazioni provenienti dal crm
+        nomeTabella:='comunicazionisede';
+        sql:='SELECT comunicazionisede_agenti_info.CodiceAgente,comunicazionisede.* ';
+        sql:=sql+'FROM comunicazionisede JOIN comunicazionisede_agenti_info ON comunicazionisede.Id = comunicazionisede_agenti_info.IdInfo ';
+        sql:=sql+'WHERE comunicazionisede_agenti_info.CodiceAgente = "'+codiceAgente+'" AND  (comunicazionisede.ValidaA >= DATE_FORMAT(CURDATE(),"%Y%m%d") OR comunicazionisede.ValidaA = "")';
+        AddFileToExport(db,destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+        //2016.02.16 Fine
+      
+        //2017.07.31+ Federico esportazione file update cambio codice agente
+        //esporto query update agenti
+        nomeTabella:='update_agente';
+        sql:='SELECT updqueries ';
+        sql:=sql+'FROM update_agente ';
+        sql:=sql+FORMAT('WHERE CodiceAgente = "%s"',[codiceAgente]);
+
+        //if db.HaveRecords(sql) then
+        //  AddFileToExport(db,destLastExpDir+nomeTabella+'.'+GetTimeStamp()+'.sql',gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+        //2017.07.31 Fine
+
+      end;
+
+      //2016.04.15 Fine
+
+              //abilitazione agenti
+        nomeTabella:='abilitazioneagenti';
+        sql:='SELECT codiceagente, Provenienza, AbilitatoForSalesIt FROM abilitazioneagenti WHERE AbilitatoForSalesIt=1 ';
+        AddfileToExport(db, destLastExpDir+_GetRepFileName(nomeTabella,true),gToPalm_export_defsDir+nomeTabella+'.def',sql,nomeTabella,params,true,ieftAutomatic);
+
+      db.StartExport();
+      dataFilesToExportCount:=db.LastExportedFileCount;
+    end;
+
+    if db.LastErrorType=etNoErrors then
+    begin
+      if dataFilesToExportCount+accountsFilesToExportCount>0 then
+      begin
+        if enableDataExport and (dataFilesToExportCount>0)        then
+        begin
+          //Cancello sempre cartella last. (modify 30-06-08)
+          if (opType = gONLYSCHEDACLI) then
+          begin
+            RemoveLastFile(destDir+'\last', destLastExpDir);
+            ExportOnlyNewFiles(destDir+'\last', destLastExpDir); //cancello i file che sono uguali all'ultima esportazione
+            DataToZip_Filter('*.txt', destLastExpDir,Format('%s\data_%s_cms.zip',[destDir,GetTimeStamp()]),'compressione archivi...');
+          end
+          else
+          begin
+            //if(fullExport)then
+            RemoveLastFile(destDir+'\last', destLastExpDir);
+            ExportOnlyNewFiles(destDir+'\last', destLastExpDir); //cancello i file che sono uguali all'ultima esportazione
+
+            //Esporto txt e iup su files diversi
+            DataToZip_Filter('*.txt', destLastExpDir,Format('%s\data_txt.zip',[destDir]),'compressione archivi...');
+            DataToZip_Filter('*.iup.*', destLastExpDir,Format('%s\data_%s_iup.zip',[destDir,GetTimeStamp()]),'compressione archivi...');
+            DataToZip_Filter('*.sql', destLastExpDir,Format('%s\data_sql.zip',[destDir]),'compressione archivi...');
+             //controllo
+            sql:='SELECT "0" AS Provenienza ';
+            sql:=sql+'UNION ';
+            sql:=sql+'SELECT CodiceSubAgente as Provenienza FROM agenti_subagenti WHERE codiceAgente="'+codiceAgente+'" ';
+            sql:=sql+'ORDER BY Provenienza DESC ';
+            rec.sql.text:=sql;
+            rec.open;
+            while not rec.eof do begin
+              provenienza:=trim(rec.FieldByName('Provenienza').asstring);
+              destLastExpDirSource:=GetToPalmExportTempDestinationSourceDirPath(codiceAgente,provenienza);
+              RemoveLastFile(destDir+'\last\'+provenienza, destLastExpDirSource);
+              ExportOnlyNewFiles(destDir+'\last\'+provenienza, destLastExpDirSource);
+              DataToZip_Filter('*.txt', destLastExpDirSource,Format('%s\data_source_txt.zip',[destDir+'\'+provenienza]),'compressione archivi...');
+              DataToZip_Filter('*.iup.*', destLastExpDirSource,Format('%s\data_source_%s_iup.zip',[destDir+'\'+provenienza,GetTimeStamp()]),'compressione archivi...');
+              DataToZip_Filter('*.sql', destLastExpDirSource,Format('%s\data_source_sql.zip',[destDir+'\'+provenienza]),'compressione archivi...');
+              rec.next;
+            end;
+            rec.close;
+          end;
+        end;
+
+        OutputAddWithTime(Format('esportazione dati agente "%s" avvenuta con successo.', [codiceAgente]),rvsSubHeading,owOk);
+        SetStatusBarText(Format('Esportazione dati agente "%s" avvenuta con successo.', [codiceAgente]));
+        AddToLog(Format('esportazione dati agente "%s" avvenuta con successo.',[codiceAgente]));
+      end
+      else
+      begin
+        OutputAddWithTime(Format('esportazione dati agente "%s" avvenuta con successo (nessun dato da esportare).', [codiceAgente]),rvsSubHeading,owOk);
+        SetStatusBarText(Format('Esportazione dati agente "%s" avvenuta con successo (nessun dato da esportare).', [codiceAgente]));
+        AddToLog(Format('esportazione dati agente "%s" avvenuta con successo (nessun dato da esportare).',[codiceAgente]));
+      end;
+    end
+    else
+    begin
+      exportErrors:=true;
+      errDestDir:=Format('%s\%s\',[gToPalm_export_errorsDir,GetInternationalDateTimeString(now)]);
+      ForceDirectories(errDestDir);
+      if enableDataExport and (dataFilesToExportCount>0)then
+      begin
+        //DataToZip(destLastExpDir,Format('%s\%s_data_%s.zip',[errDestDir,codiceAgente,GetTimeStamp()]),'compressione archivi...');
+        DataToZip(destLastExpDir,Format('%s\%s_data.zip',[errDestDir,codiceAgente]),'compressione archivi...');
+      end;
+
+      if FileExists(destDir+gACCOUNTS_FILENAME_CRYPTED) then
+        MoveFile(destDir+gACCOUNTS_FILENAME_CRYPTED,errDestDir+gACCOUNTS_FILENAME_CRYPTED);
+
+      OutputAddWithTime(Format('esportazione dati agente "%s" avvenuta con errori.', [codiceAgente]),rvsError,owStop);
+      SetStatusBarText(Format('Esportazione dati agente "%s" avvenuta con errori.', [codiceAgente]));
+      AddToLog(Format('esportazione dati agente "%s" avvenuta con errori',[codiceAgente]));
+    end;
+
+    OutputAddEmptyLine();
+  end;
+
+  test_query.close;
+  test_query.free;
+  rec.free;
+
+
+  if (exportedAgent=0) then
+  begin
+    result:=true;
+    OutputAddWithTime('nessun file da esportare.',rvsSubHeading,owInfo)
+    OutputAddEmptyLine();
+    AddToLog('nessun file da esportare.')
+    exit;
+  end
+  else
+  begin
+    if exportErrors then
+    begin
+      SendToPalmErrorEmail();
+      SetStatusBarText('Esportazione dati avvenuta con errori.')
+    end
+    else
+    begin
+      SetStatusBarText('Esportazione dati avvenuta con successo.');
+
+      //imposto come esportati i record delle tabelle
+      in_sql:='';
+      for i:=0 to exportAgentList.count-1 do
+      begin
+        if(in_sql<>'') then in_sql:=in_sql+',';
+        in_sql:=in_sql+''''+trim(exportAgentList[i])+'''';
+      end;
+      if(in_sql<>'')then
+      begin
+        in_sql:=' codiceagente in( '+in_sql+' )';
+        SetExportedEx(db,in_sql);
+      end;
+
+    end;
+  end;
+
+  if ((DebugMode=false) and (flag_export='0')) then   //FTP Solo in produzione e non in test
+    DoFtp(db,exportAgentList, fullExport);            //elimino tutti i files ftp
+  params.Free;
+end;
