@@ -1,0 +1,354 @@
+{ Version 0.1 (2006.08.04) }
+
+{$IFNDEF AF_COMMON}
+{$DEFINE AF_COMMON}
+
+{$I ..\Libs\stdLib.lib}
+
+// file di configurazione
+const
+  gDEFAULTCONFIGURATIONINI            = 'Config.ini';
+  gDEBUGCOFIGURATIONINI               = 'Config.debug.ini';
+
+  gEXPORTEDFLAG_GESTTOMOBILE            = 0;
+  gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE   = 1;
+
+  gEXPORTEDFLAG_MOBILETOGEST            = 0;
+  gEXPORTEDFLAG_EXPORTED_MOBILETOGEST   = 1;
+  gEXPORTEDFLAG_MOBILETOGEST_LOCK       = 3;
+
+  gEXPORTEDFLAG_FSNOTCONFIRMED          = 4;
+  gEXPORTEDFLAG_TOALL                   = 5;
+
+  gMOBILE_AGENT_SQL = 'SELECT CONCAT(CodiceAgente, "##", CodiceAzienda) AS CodiceAgente, Descrizione FROM agenti WHERE CONCAT(CodiceAgente, "##", CodiceAzienda) IN (SELECT codiceagente FROM abilitazioneagenti WHERE abilitatoMobile<>0) ORDER BY CodiceAgente ';
+  gFULL_AGENT_SQL = 'SELECT CONCAT(CodiceAgente, "##", CodiceAzienda) AS CodiceAgente FROM agenti WHERE CONCAT(CodiceAgente, "##", CodiceAzienda) IN (SELECT codiceagente FROM abilitazioneagenti WHERE abilitatoMobile<>0) ORDER BY CodiceAgente';
+
+  gFTPDOWNLOAD_DEFAULTDIR     = 'download';
+  gFTPBACKUP_DEFAULTDIR       = 'upload/backup';
+  gFTPUPLOAD_DEFAULTDIR       = 'upload';
+
+var
+  gHistoryDays:integer;
+
+function InitOptions(var importExportOptions:TImportExportOptions;gestToMobile:boolean):boolean;
+var
+  ini:TIniFile;
+  str:string;
+  configurationIni:string;
+  ftpAccount:TFTPAccount;
+  gestToMobile_importDirs,gestToMobile_exportDirs:TImportExportDirs;
+  mobileToGest_importDirs,mobileToGest_exportDirs:TImportExportDirs;
+begin
+
+  if DebugMode then
+    configurationIni:=gDEBUGCOFIGURATIONINI
+  else
+    configurationIni:=gDEFAULTCONFIGURATIONINI;
+
+  result:=false;
+  if not FileExists(configurationIni) then
+  begin
+    MessageDialog(Format('File di configurazione "%s" non trovato. La procedura verrà terminata.',[configurationIni]),mtError,[mbOk]);
+    AddToLog(Format('File di configurazione "%s" non trovato.',[configurationIni]));
+    exit;
+  end;
+
+  try
+    try
+      ini:=TIniFile.Create(GetApplicationPath()+configurationIni);
+
+      // generali
+      gHistoryDays := ini.ReadInteger('General','HistoryDays',730);
+
+      // file di lock
+      importExportOptions.externalLockFileName    :=  ini.ReadString('Lock','Gest','');
+      importExportOptions.autoFilterLockFileName  :=  ini.ReadString('Lock','Autofilter','');
+
+
+      // fromGest
+      with gestToMobile_importDirs do
+      begin
+        base                        :=  ini.ReadString('FromGest','ImportDir'             ,'');
+        backup                      :=  ini.ReadString('FromGest','BackupDir'             ,'.\Common\Backup\FromGest\');
+        errors                      :=  ini.ReadString('FromGest','ErrorsDir'             ,'.\Common\Errors\Archives\FromGest\');
+        errorsEmailError            :=  ini.ReadString('FromGest','ErrorsEmailErrorDir'   ,'.\Common\Errors\Emails-err\FromGest\');
+        errorsEmailOK               :=  ini.ReadString('FromGest','ErrorsEmailOKDir'      ,'.\Common\Errors\Emails-ok\FromGest\');
+        defs                        :=  ini.ReadString('FromGest','DefsDir'               ,'.\Defs\GestToMobile\In\');
+      end;
+
+      // ToMobile
+      with gestToMobile_exportDirs do
+      begin
+        base                        :=  ini.ReadString('ToMobile','ExportDir'             ,'');
+        working                     :=  ini.ReadString('ToMobile','WorkingDir'            ,'.\Common\Site\ToMobile\');
+        backup                      :=  ini.ReadString('ToMobile','BackupDir'             ,'.\Common\Backup\ToMobile\');
+        errors                      :=  ini.ReadString('ToMobile','ErrorsDir'             ,'.\Common\Errors\Archives\ToMobile\');
+        errorsEmailError            :=  ini.ReadString('ToMobile','ErrorsEmailErrorDir'   ,'.\Common\Errors\Emails-err\ToMobile\');
+        errorsEmailOK               :=  ini.ReadString('ToMobile','ErrorsEmailOKDir'      ,'.\Common\Errors\Emails-ok\ToMobile\');
+        defs                        :=  ini.ReadString('ToMobile','DefsDir'               ,'.\Defs\GestToMobile\Out\');
+      end;
+
+
+      // fromMobile
+      with mobileToGest_importDirs do
+      begin
+        base                        :=  ini.ReadString('FromMobile','ImportDir'           ,'');
+        backup                      :=  ini.ReadString('FromMobile','BackupDir'           ,'.\Common\Backup\FromMobile\');
+        errors                      :=  ini.ReadString('FromMobile','ErrorsDir'           ,'.\Common\Errors\Archives\FromMobile\');
+        errorsEmailError            :=  ini.ReadString('FromMobile','ErrorsEmailErrorDir' ,'.\Common\Errors\Emails-err\FromMobile\');
+        errorsEmailOK               :=  ini.ReadString('FromMobile','ErrorsEmailOKDir'    ,'.\Common\Errors\Emails-ok\FromMobile\');
+        defs                        :=  ini.ReadString('FromMobile','DefsDir'             ,'.\Defs\MobileToGest\In\');
+      end;
+
+      // toGest
+      with mobileToGest_exportDirs do
+      begin
+        base                        :=  ini.ReadString('ToGest','ExportDir'               ,'');
+        working                     :=  ini.ReadString('ToGest','WorkingDir'              ,'.\Common\Site\ToGest\');
+        backup                      :=  ini.ReadString('ToGest','BackupDir'               ,'.\Common\Backup\ToGest\');
+        errors                      :=  ini.ReadString('ToGest','ErrorsDir'               ,'.\Common\Errors\Archives\ToGest\');
+        errorsEmailError            :=  ini.ReadString('ToGest','ErrorsEmailErrorDir'     ,'.\Common\Errors\Emails-err\ToGest\');
+        errorsEmailOK               :=  ini.ReadString('ToGest','ErrorsEmailOKDir'        ,'.\Common\Errors\Emails-ok\ToGest\');
+        defs                        :=  ini.ReadString('ToGest','DefsDir'                 ,'.\Defs\MobileToGest\Out\');
+      end;
+
+       // Ftp mobile
+      with ftpAccount do
+      begin
+        Host                        :=  ini.ReadString('FtpMobile','HostName','');
+        UserName                    :=  ini.ReadString('FtpMobile','UserName','');
+        Password                    :=  ini.ReadString('FtpMobile','Password','');
+        BaseDir                     :=  ini.ReadString('FtpMobile','BaseDir','');
+        PassiveMode                 :=  ini.ReadBool('FtpMobile','PassiveMode',true);
+        Port                        :=  ini.ReadInteger('FtpMobile','Port',gFTPDEFAULTPORT);
+        TimeOut                     :=  ini.ReadInteger('FtpMobile','TimeOut',gFTPDEFAULTTIMEOUTSECS);
+        QuitTimeOut                 :=  ini.ReadInteger('FtpMobile','QuitTimeOut',gFTPDEFAULTQUITTIMEOUTSECS);
+        BackupDowloadedFiles        :=  ini.ReadBool('FtpMobile','BackupDowloadedFiles',true);
+        Active                      :=  ini.ReadBool('FtpMobile','Active',true);
+      end;
+
+      if gestToMobile then
+      begin
+        importExportOptions.importDirs:=gestToMobile_importDirs;
+        importExportOptions.exportDirs:=gestToMobile_exportDirs;
+
+        importExportOptions.exportFtp:=ftpAccount
+      end
+      else
+      begin
+        importExportOptions.importDirs:=mobileToGest_importDirs;
+        importExportOptions.exportDirs:=mobileToGest_exportDirs;
+
+        importExportOptions.importFtp:=ftpAccount;
+      end;
+
+      // Email documenti
+      with importExportOptions.docsEmailAccount do
+      begin
+        enabled         :=  ini.ReadBool('DocEmailAccount','Enabled',true);
+        host				    :=  ini.ReadString('DocEmailAccount','SmtpHost','');
+        user            :=  ini.ReadString('DocEmailAccount','User','');
+        pwd             :=  ini.ReadString('DocEmailAccount','Password','');
+        fromName        :=  ini.ReadString('DocEmailAccount','FromName','');
+        fromAddress     :=  ini.ReadString('DocEmailAccount','FromAddress','');
+        port            :=  ini.ReadString('DocEmailAccount','Port','smtp');
+        retryCount      :=  ini.ReadInteger('DocEmailAccount','RetryCount',5);
+        retrySecs       :=  ini.ReadInteger('DocEmailAccount','RetrySecs',60);
+        defaultTo       :=  ini.ReadString('DocEmailAccount','DefaultTo','');
+        defaultCC       :=  ini.ReadString('DocEmailAccount','DefaultCC','');
+        defaultCCN      :=  ini.ReadString('DocEmailAccount','DefaultCCN','');
+        timeout         :=  ini.ReadInteger('DocEmailAccount','timeout',15);
+      end;
+
+      // Email errori
+      with importExportOptions.notificationsEmailAccount do
+      begin
+        enabled         :=  ini.ReadBool('NotificationsEmailAccount','Enabled',true);
+        host				    :=  ini.ReadString('NotificationsEmailAccount','SmtpHost','');
+        user            :=  ini.ReadString('NotificationsEmailAccount','User','');
+        pwd             :=  ini.ReadString('NotificationsEmailAccount','Password','');
+        fromName        :=  ini.ReadString('NotificationsEmailAccount','FromName','');
+        fromAddress     :=  ini.ReadString('NotificationsEmailAccount','FromAddress','');
+        port            :=  ini.ReadString('NotificationsEmailAccount','Port','smtp');
+        retryCount      :=  ini.ReadInteger('NotificationsEmailAccount','RetryCount',5);
+        retrySecs       :=  ini.ReadInteger('NotificationsEmailAccount','RetrySecs',60);
+        defaultTo       :=  ini.ReadString('NotificationsEmailAccount','DefaultTo','');
+        defaultCC       :=  ini.ReadString('NotificationsEmailAccount','DefaultCC','');
+        defaultCCN      :=  ini.ReadString('NotificationsEmailAccount','DefaultCCN','');
+      end;
+
+      // init dirs
+      with importExportOptions do
+      begin
+        ForceDirectories(gestToMobile_importDirs.defs);
+        ForceDirectories(gestToMobile_importDirs.base);
+
+        ForceDirectories(gestToMobile_exportDirs.defs);
+        ForceDirectories(gestToMobile_exportDirs.base);
+
+        ForceDirectories(mobileToGest_importDirs.defs);
+        ForceDirectories(mobileToGest_importDirs.base);
+
+        ForceDirectories(mobileToGest_exportDirs.defs);
+        ForceDirectories(mobileToGest_exportDirs.base);
+      end;
+      result:=true;
+    except
+      str:=Format('Exception: %s',[GetExceptionsString()]);
+      MessageDialog(str,mtError,[mbOk]);
+      AddToLog(str);
+      result:=false;
+    end;
+  finally
+    ini.free;
+  end;
+end;
+
+function SetExported(db:TDataBase;tblName:string;flagFrom,flagTo:integer):boolean;
+var
+  auxCond:string;
+begin
+  result:=true;
+  if db.ExistsTable(tblName) then
+  begin
+    try
+      result:=SetExportedFlagEx(db,tblName,auxCond,flagFrom,flagTo,false);
+    except
+      result:=false;
+    end;
+  end
+end;
+
+function SetExportedAgent(db:TDataBase;tblName,agentCode:string;flagFrom,flagTo:integer):boolean;
+var
+  auxCond:string;
+begin
+  result:=true;
+  if agentCode<>'' then
+    auxCond:=format('codiceAgente="%s" ',[agentCode]);
+
+  if db.ExistsTable(tblName) then
+  begin
+    try
+      result:=SetExportedFlagEx(db,tblName,auxCond,flagFrom,flagTo,false);
+    except
+      result:=false;
+    end;
+  end
+end;
+
+function SqlFileToString(fileName:string):string;
+var
+  sql:string;
+begin
+  FileToString(fileName,sql);
+  sql:=StringReplace(sql,#13,' ',true);
+  result:=StringReplace(sql,#10,' ',true);
+end;
+
+function RicavaLinguaAgente(db:TDataBase;agentCode,companyCode:string):string;
+var
+  sql:string;
+begin
+  sql:=Format('select lingua from linguaagenti where codiceagente="%s" AND CodiceAzienda = "%s" ',[agentCode,companyCode]);
+  result:=Trim(GetScalar(db,sql,'IT'));
+end;
+
+function RicavaDescrizioneAgente(db:TDataBase;agentCode,companyCode:string):string;
+var
+  sql:string;
+begin
+  sql:=Format('SELECT Descrizione FROM agenti WHERE CodiceAgente = "%s" AND CodiceAzienda = "%s" ',[agentCode,companyCode]);
+  result:=Trim(GetScalar(db,sql,''));
+end;
+
+function RicavaProvenienzaStrFromCode(provenienza:string):string;
+begin
+  provenienza:=trim(provenienza);
+  if provenienza='0' then result:='iPad';
+  if provenienza='1' then result:='Web';
+end;
+
+function EliminaDocumento(db:TDataBase;codiceAgente,numeroDoc,dataDoc,provenienza:string):boolean;
+var
+  where:string;
+begin
+ where:=Format(' where codiceAgente="%s" and dataDoc="%s" and numerodoc="%s" and provenienza="%s" ',[codiceAgente,dataDoc,numeroDoc,provenienza]);
+ result:=db.ExecuteSql('delete from docmaster'+where);
+ result:=result and db.ExecuteSql('delete from docdetails'+where);
+ result:=result and db.ExecuteSql('delete from docnotes'+where);
+end;
+
+//Ritorna il nome della Company in base al codice passato per parametro
+function GetCompanyName(companyCode:string):string;
+begin
+  result:= '';
+  if companyCode = '0' then result:= 'PENGO ITA';
+  if companyCode = '1' then result:= 'MORINI SRL';
+  if companyCode = '2' then result:= 'BARBIER SA';
+end;
+
+//Ritorna il nome della Company in base al codice passato per parametro
+function GetCompanyCodeZefiro(companyCode:string):string;
+begin
+  result:= '';
+  if companyCode = '0' then result:= '001';
+  if companyCode = '1' then result:= '003';
+  if companyCode = '2' then result:= '002';
+end;
+
+//Ritorna il codice azienda di Pengo partendo dal path di import dati
+function GetCompanyZefiroFromPath(importPath:string):string;
+var
+  dataBaseDir,companyCode:string;
+  indexOfCompany:integer;
+begin
+
+  result := '';
+
+  //TODO prendere il valore dall'INI
+  dataBaseDir := 'E:\FTP_Pengo\SFA_Nexttech\';
+
+  if debugMode then
+    dataBaseDir := 'D:\ftp\pengo\';
+
+  companyCode := StringReplace(importPath, dataBaseDir, '', true);
+  indexOfCompany := pos('\', companyCode);
+  companyCode := copy(companyCode, 1, indexOfCompany-1);
+
+  result := GetCompanyCodeZefiro(companyCode);
+
+end;
+
+//In base alla tabella mi ritorna il nome del campo che riferisce al codice azienda
+function getCompanyFieldNameFromTable(tableName:string):string;
+begin
+
+  tableName := uppercase(tableName);
+
+  if tableName = 'ANAAG'        then result := 'CDAZAG';
+  if tableName = 'ANIMM'        then result := 'CDARZ';
+  if tableName = 'ARTEAN'       then result := 'CDAZ5';
+  if tableName = 'ARTICOLI'     then result := 'CDAZ4';
+  if tableName = 'ARTLNG'       then result := 'CDAZ8';
+  if tableName = 'ASSORTI'      then result := 'CDAZ7';
+  if tableName = 'CLIENTI'      then result := 'CDAZ1';
+  if tableName = 'CLUSTERART'   then result := 'CDAZSL';
+  if tableName = 'CLUSTERCLI'   then result := 'CDAZSM';
+  if tableName = 'LISTINI'      then result := 'CodiceAzienda';
+  if tableName = 'LISTINICES'   then result := 'CDAZ2';
+  if tableName = 'TABFAMI'      then result := 'CDAZV';
+  if tableName = 'TABFAMIMERC'  then result := 'CDAZ4';
+  if tableName = 'TABSOFAMERC'  then result := 'CDAZ4';
+  if tableName = 'TABSOTF'      then result := 'CDAZW';
+  if tableName = 'TBAGE'        then result := 'CDAZ5';
+  if tableName = 'TBCATALOGHI'  then result := 'CDAZ4';
+  if tableName = 'TBFORNITORI'  then result := 'CDAZ6';
+  if tableName = 'TBMARCHI'     then result := 'CDAZF';
+  if tableName = 'ART_IMMAGINI' then result := 'CDAZIM';
+  if tableName = 'TIPIDOC'      then result := 'CodiceAzienda';
+  if tableName = 'RIFORCLI'     then result := 'CDAZ01';
+
+end;
+
+{$ENDIF}
