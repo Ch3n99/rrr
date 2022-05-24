@@ -1,0 +1,510 @@
+{ Version 0.1 (2006.08.04) }
+
+{$IFNDEF AF_PDF}
+{$DEFINE AF_PDF}
+
+{$I ..\Libs\stdLib.lib}
+{$I Common.lib}
+
+const
+  gPDFDOCVERSION              = '1.0';
+  gMAILVERSION                = '1.0';
+
+function createDocPdfOrdine(importExportOptions:TImportExportOptions;numeroDocSFA,provenienzaSFA,dataDocSFA,codiceAgenteSFA,codicepredocl1:string;var linguaIso:string;showNotes:boolean;var pdfFileName:string;destinazione:string):boolean;
+var
+  timeStamp,dataDocIt,dataDocInt,translateFileName:string;
+  pdfTitle,pdfAuthor,pdfSubject:string;
+  pdfPath:string;
+  pdfTitleFmt,pdfSubjectFmt,pdfFileNameFmt:string;
+begin
+  dataDocIt   := GetDateItaStringFromTimestamp(dataDocSFA);
+  dataDocInt  := GetInternationalDateString(GetTimestampToDateTime(datadocSFA));
+  dataDocInt  := StringReplace(dataDocInt,'.','-',true)
+
+  OutputAddWithIndentWithTime(Format('Creazione documento ordine n. %s del %s (destinazione: %s) in corso...',[numeroDocSFA,dataDocIt,destinazione]),rvsNormal,owDocuments);
+  SetStatusBarText(Format('Creazione documento ordine n. %s del %s (destinazione: %s, agente: %s) in corso...',[numeroDocSFA,dataDocIt,destinazione,codiceAgenteSFA]));
+  AddToLog(Format('inizio creazione documento ordine n. %s del %s (codiceAgente: %s, destinazione: %s) in corso...',[numeroDocSFA,dataDocIt,codiceAgenteSFA,destinazione]));
+
+  timeStamp := GetTimestamp();
+  pdfPath   := Format('%s\%s\%s\pdf\',[importExportOptions.exportDirs.backup,left(timeStamp,4),codiceAgenteSFA]);
+  translateFileName := 'Reports\translate\ordine_' + linguaIso + '.lng';
+
+  ForceDirectories(pdfPath);
+  ReportBuilder_New();
+  ReportBuilder_SetTemplateFileName('Reports\ordine.fr4');
+  ReportBuilder_SetDatabaseFromDB(importExportOptions.db);
+  ReportBuilder_SetTranslateFileName(translateFileName);
+
+  pdfTitleFmt     := 'Documento agente %s - %s';
+  pdfSubjectFmt   := 'Proposta d''ordine n. %s del %s';
+  pdfFileNameFmt  := 'Proposta d''ordine n %s del %s (%s).pdf';
+  pdfAuthor       := 'Pengo';
+
+  pdfTitle    := Utf8Decode(Format(pdfTitleFmt,[codiceagenteSFA,RicavaDescrizioneAgente(importExportOptions.db,codiceagenteSFA,'0')])); //TODO codiceazienda
+  pdfSubject  := Utf8Decode(Format(pdfSubjectFmt,[numerodocSFA,dataDocIt]));
+  pdfFileName := Utf8Decode(Format(pdfFileNameFmt,[numerodocSFA,dataDocInt,destinazione]));
+  pdfFileName := NormalizePath(pdfPath) + pdfFileName;
+  DeleteFile(pdfFileName);
+
+  ReportBuilder_SetDocInfo(pdfTitle,pdfAuthor,pdfSubject);
+
+  // variabili
+  ReportBuilder_AddStringVar('numerodoc',numerodocSFA);
+  ReportBuilder_AddStringVar('provenienza',provenienzaSFA);
+  ReportBuilder_AddStringVar('datadoc',datadocSFA);
+  ReportBuilder_AddStringVar('codiceagente',codiceagenteSFA);
+  ReportBuilder_AddStringVar('linguaIso',linguaIso);
+  ReportBuilder_AddStringVar('codicepredocl1',codicepredocl1);
+  ReportBuilder_AddBoolVar('showNotes',showNotes);
+  ReportBuilder_SetLogFileName('Logs\reportBuilder.log');
+  ReportBuilder_SetOutFileName(pdfFileName);
+
+  result := ReportBuilder_DoProcess(not true); //true=design mode
+
+  ReportBuilder_Free();
+
+  if result then
+  begin
+    OutputAddNoNewLine('OK.',rvsNormal,owNoIcon);
+    AddToLog('creazione documento avvenuta con successo.');
+  end
+  else
+  begin
+    OutputAddNoNewLine('NON OK.',rvsError,owNoIcon);
+    AddToLog('creazione documento avvenuta con errori.');
+  end;
+end;
+
+function createDocPdfNuovaAnagrafica(importExportOptions:TImportExportOptions;codiceAgenteSFA,codiceClienteSFA:string;var pdfFileName:string):boolean;
+var
+  timeStamp,translateFileName:string;
+  pdfTitle,pdfAuthor,pdfSubject:string;
+  pdfPath:string;
+  pdfTitleFmt,pdfSubjectFmt,pdfFileNameFmt:string;
+begin
+
+  OutputAddWithIndentWithTime(Format('Creazione documento nuova anagrafica (agente %s - cliente %s) in corso...',[codiceagenteSFA,codiceclienteSFA]),rvsNormal,owDocuments);
+  SetStatusBarText(Format('Creazione documento nuova anagrafica (agente %s - cliente %s) in corso...',[codiceagenteSFA,codiceclienteSFA]));
+  AddToLog(Format('Creazione documento nuova anagrafica (agente %s - cliente %s) in corso...',[codiceagenteSFA,codiceclienteSFA]));
+
+  timeStamp := GetTimestamp();
+  pdfPath   := Format('%s\%s\%s\pdf\',[importExportOptions.exportDirs.backup,left(timeStamp,4),codiceAgenteSFA]);
+  translateFileName := 'Reports\translate\nuovoCliente_IT.lng';
+
+  ForceDirectories(pdfPath);
+  ReportBuilder_New();
+  ReportBuilder_SetTemplateFileName('Reports\nuovocliente.fr4');
+  ReportBuilder_SetDatabaseFromDB(importExportOptions.db);
+  ReportBuilder_SetTranslateFileName(translateFileName);
+  ReportBuilder_SetExportPdfEngine(eeFastReport);
+  ReportBuilder_SetEmbedFonts(true);
+  ReportBuilder_SetReprocessPdf(true);
+
+  pdfTitleFmt     := 'Nuova anagrafica agente %s - cliente %s';
+  pdfSubjectFmt   := 'Nuova anagrafica agente %s - cliente %s';
+  pdfFileNameFmt  := 'Nuova anagrafica agente %s - cliente %s.pdf';
+  pdfAuthor       := 'Pengo';
+
+  pdfTitle    := Utf8Decode(Format(pdfTitleFmt,[codiceagenteSFA,codiceclienteSFA]));
+  pdfSubject  := Utf8Decode(Format(pdfSubjectFmt,[codiceagenteSFA,codiceclienteSFA]));
+  pdfFileName := Utf8Decode(Format(pdfFileNameFmt,[codiceagenteSFA,codiceclienteSFA]));
+  pdfFileName := NormalizePath(pdfPath) + GetInternationalDateTimeString(now) + ' - ' + pdfFileName;
+  DeleteFile(pdfFileName);
+
+  ReportBuilder_SetDocInfo(pdfTitle,pdfAuthor,pdfSubject);
+
+  // variabili
+  ReportBuilder_AddStringVar('codiceagente',codiceagenteSFA);
+  ReportBuilder_AddStringVar('codicecliente',codiceclienteSFA);
+  ReportBuilder_SetLogFileName('Logs\reportBuilder.log');
+  ReportBuilder_SetOutFileName(pdfFileName);
+
+  result := ReportBuilder_DoProcess(not true); //true=design mode
+
+  ReportBuilder_Free();
+
+  if result then
+  begin
+    OutputAddNoNewLine('OK.',rvsNormal,owNoIcon);
+    AddToLog('creazione documento avvenuta con successo.');
+  end
+  else
+  begin
+    OutputAddNoNewLine('NON OK.',rvsError,owNoIcon);
+    AddToLog('creazione documento avvenuta con errori.');
+  end;
+end;
+
+function CreateDocSend(db:TDataBase):boolean;
+var
+  sql:string;
+begin
+  sql:='CREATE TABLE docsend (';
+  sql:=sql+'addTimeStamp varchar(17) NOT NULL,agentCode varchar(10) NOT NULL,isoLanguage varchar(2) DEFAULT NULL, ';
+  sql:=sql+'emailTo varchar(255) NOT NULL,emailCC varchar(255) NOT NULL,emailCCN varchar(255) NOT NULL, ';
+  sql:=sql+'emailSubject varchar(255),emailBody longtext, ';
+  sql:=sql+'attachments longtext,';
+  sql:=sql+'sendTimestamp varchar(14) DEFAULT NULL, ';
+  sql:=sql+'PRIMARY KEY (addTimeStamp)) ';
+
+  result:=db.ExecuteSql(sql);
+  if result then
+  begin
+    sql:='ALTER TABLE docsend ADD INDEX idx1 (agentCode) ';
+    result:=db.ExecuteSql(sql);
+    sql:='ALTER TABLE docsend ADD INDEX idx2 (sendTimestamp) ';
+    result:=result and db.ExecuteSql(sql);
+  end;
+end;
+
+{function GetCurrentTimestampFull(): string;
+begin
+  result:=FormatDateTime('yyyymmddhhmmsszzz', now);
+end;}
+
+function InsertOrdineIntoDocSend(importExportOptions:TImportExportOptions;numeroDocSFA,provenienzaSFA,dataDocSFA,codiceAgenteSFA,linguaIso,pdfFileName,emailTo,emailCC,emailCCN:string;numeroDocGest:integer;dataconsSFA:string):boolean;
+var
+  sql:string;
+  dataDocIt:string;
+  emailSubject,emailBody,nomeAgente:string;
+  emailSubjectFmt,emailBodyFmt:string;
+  attachments:TStringList;
+begin
+  result:=true;
+
+  if trim(emailTo)='' then
+    exit;
+
+  if ExtractFileName(pdfFileName)='' then
+    exit;
+
+  CreateDocSend(importExportOptions.db);
+
+  try
+    attachments:=TStringList.Create();
+
+    dataDocIt:=GetDateItaStringFromTimestamp(dataDocSFA);
+    nomeAgente:=RicavaDescrizioneAgente(importExportOptions.db,codiceAgenteSFA,'0'); //TODO codiceazienda
+
+    emailSubjectFmt:='[%s] - Proposta d''ordine n.%s del %s - Agente %s - %s';
+    emailBodyFmt:='Proposta d''ordine n.%s del %s\nAgente %s - %s';
+
+    emailSubject:=Format(emailSubjectFmt,[numeroDocSFA,dataDocIt,codiceAgenteSFA,nomeAgente]);
+    emailBody:=Format(emailBodyFmt,[numeroDocSFA,dataDocIt,codiceAgenteSFA,nomeAgente]);
+
+    pdfFileName:=stringreplace(pdfFileName,'\','\\',true)
+    attachments.Add(pdfFileName);
+
+    sql:='INSERT INTO docsend (addTimeStamp,agentCode,isoLanguage,emailTo,emailCC,emailCCN,emailSubject,emailBody,attachments,sendTimestamp) VALUES ';
+    sql:=sql+format('("%s","%s","%s","%s","%s","%s","%s","%s","%s","%s")',[GetCurrentTimestampFull,codiceAgenteSFA,linguaIso,emailTo,emailCC,emailCCN,emailSubject,emailBody,attachments.text,'']);
+
+    try
+      result:=importExportOptions.db.executeSql(sql);
+    except
+      result:=false;
+    end;
+  finally
+    attachments.free;
+  end;
+end;
+
+function InsertNuovaAnagraficaIntoDocSend(importExportOptions:TImportExportOptions;codiceAgenteSFA,codiceclienteSFA,pdfFileName,emailTo,emailCC,emailCCN:string):boolean;
+var
+  sql:string;
+  emailSubject,emailBody:string;
+  emailSubjectFmt,emailBodyFmt:string;
+  attachments:TStringList;
+begin
+  result:=true;
+
+  if trim(emailTo)='' then
+    exit;
+
+  if ExtractFileName(pdfFileName)='' then
+    exit;
+
+  CreateDocSend(importExportOptions.db);
+
+  try
+    attachments:=TStringList.Create();
+
+    emailSubjectFmt :='Nuova anagrafica (agente %s - cliente %s)';
+    emailBodyFmt    :='Nuova anagrafica (agente %s - cliente %s)';
+    emailSubject    :=Format(emailSubjectFmt,[codiceAgenteSFA,codiceClienteSFA]);
+    emailBody       :=Format(emailBodyFmt,[codiceAgenteSFA,codiceClienteSFA]);
+
+    pdfFileName:=stringreplace(pdfFileName,'\','\\',true)
+    attachments.Add(pdfFileName);
+
+    sql:='INSERT INTO docsend (addTimeStamp,agentCode,isoLanguage,emailTo,emailCC,emailCCN,emailSubject,emailBody,attachments,sendTimestamp) VALUES ';
+    sql:=sql+format('("%s","%s","%s","%s","%s","%s","%s","%s","%s","%s")',[GetCurrentTimestampFull,codiceAgenteSFA,'IT',emailTo,emailCC,emailCCN,emailSubject,emailBody,attachments.text,'']);
+
+    try
+      result:=importExportOptions.db.executeSql(sql);
+    except
+      result:=false;
+    end;
+  finally
+    attachments.free;
+  end;
+end;
+
+function CreateDocsPdf(importExportOptions:TImportExportOptions):boolean;
+var
+  qry:TZQuery;
+  sql:string;
+  numeroDoc,provenienza,dataDoc,codiceAgente,codiceCliente,codicepredocl1,linguaIso,emailAgente,emailCliente,emailSede:string;
+  pdfFileName,str:string;
+  db:TDataBase;
+  docsCount:integer;
+  ret:boolean;
+begin
+  str:=Format('inizio creazione documenti (versione: %s)...',[gPDFDOCVERSION]);
+  OutputAddWithTime(str,rvsSubHeading,owInfo);
+  AddToLog(str);
+  linguaIso:='IT';
+
+  // Creo email PDF ordini
+  try
+    db:=importExportOptions.db;
+    qry:=TZQuery.Create(nil);
+    qry.Connection:=TZConnection(db);
+    sql:=Format('SELECT * FROM docmaster WHERE docmaster_exported_=%d ORDER BY codiceAgente,datadoc,numerodoc,provenienza',[gEXPORTEDFLAG_MOBILETOGEST_LOCK]);
+    qry.SQL.Add(sql);
+    result:=true;
+
+    try
+      qry.Open;
+      docsCount:=qry.recordCOunt;
+
+      while not qry.eof do
+      begin
+        numeroDoc       := qry.FieldByName('numeroDoc').AsString;
+        provenienza     := qry.FieldByName('provenienza').AsString;
+        dataDoc         := qry.FieldByName('dataDoc').AsString;
+        codiceAgente    := qry.FieldByName('codiceAgente').AsString;
+        codicepredocl1  := qry.FieldByName('codicepredocl1').AsString;
+
+        // Recupero indirizzo email e lingua agente
+        sql := Format('SELECT indirizzoEmail FROM rubricaIndirizziEmail WHERE codiceagente="%s" ',[codiceAgente]);
+        emailAgente := Trim(GetScalar(db,sql,''));
+        sql := Format('SELECT linguaAgente FROM rubricaIndirizziEmail WHERE codiceagente="%s" ',[codiceAgente]);
+        linguaIso := Trim(GetScalar(db,sql,''));
+
+        // Creo PDF agente
+        //ret := createDocPdfOrdine(importExportOptions,numeroDoc,provenienza,dataDoc,codiceAgente,codicepredocl1,linguaIso,true,pdfFileName,'agente');
+        //if (ret and (emailAgente<>'')) then
+        //    InsertOrdineIntoDocSend(importExportOptions,numeroDoc,provenienza,dataDoc,codiceAgente,linguaIso,pdfFileName,emailAgente,'','',-1,'');
+
+
+        //Creo PDF per cliente (mail inserite custom dal cliente in chiusura d'ordine)
+        sql := Format('SELECT RIGHT(ModoInvio, LENGTH(ModoInvio)-1) AS ModoInvio FROM docmaster WHERE CodiceAgente = "%s" AND NumeroDoc = "%s" AND DataDoc = "%s" AND Provenienza = "%s" ', [codiceAgente,numeroDoc,dataDoc,provenienza]);
+        emailCliente := Trim(GetScalar(db,sql,''));
+        if (ret and (emailCliente<>'')) then
+            InsertOrdineIntoDocSend(importExportOptions,numeroDoc,provenienza,dataDoc,codiceAgente,linguaIso,pdfFileName,emailCliente,'','',-1,'');
+
+        // Recupero indirizzo email e lingua sede
+        if (debugMode) then
+          emailSede := 'dario.tognacci@nexttech.it'
+        else
+          emailSede := 'support-ced@pengospa.it;cli@pengospa.it';
+        linguaIso := 'IT';
+
+        // Creo PDF sede
+        ret := createDocPdfOrdine(importExportOptions,numeroDoc,provenienza,dataDoc,codiceAgente,codicepredocl1,linguaIso,true,pdfFileName,'sede');
+        if (ret and (emailSede<>'')) then
+            InsertOrdineIntoDocSend(importExportOptions,numeroDoc,provenienza,dataDoc,codiceAgente,linguaIso,pdfFileName,emailSede,'','',-1,'');
+
+
+        result:=result and ret;
+        qry.next;
+      end;
+
+    except
+      result:=false;
+    end;
+
+  finally
+    qry.free;
+  end;
+
+  // Creo email PDF nuove anagrafiche
+  try
+    db:=importExportOptions.db;
+    qry:=TZQuery.Create(nil);
+    qry.Connection:=TZConnection(db);
+    sql:=Format('SELECT * FROM docanagcli WHERE docanagcli_exported_=%d ORDER BY codiceAgente,codicecliente',[gEXPORTEDFLAG_MOBILETOGEST_LOCK]);
+    qry.SQL.Add(sql);
+    result:=true;
+
+    try
+      qry.Open;
+      docsCount:=qry.recordCOunt;
+
+      while not qry.eof do
+      begin
+        codiceCliente   := qry.FieldByName('codiceCliente').AsString;
+        codiceAgente    := qry.FieldByName('codiceAgente').AsString;
+
+        // Recupero indirizzo email e lingua sede
+        if (debugMode) then
+          emailSede:='dario.tognacci@nexttech.it'
+        else
+          emailSede:='support-ced@pengospa.it;cli@pengospa.it;cont@pengospa.it';
+        linguaIso := 'IT';
+
+        // Creo PDF sede
+        ret := createDocPdfNuovaAnagrafica(importExportOptions,codiceAgente,codiceCliente,pdfFileName);
+        if (ret and (emailSede<>'')) then
+            InsertNuovaAnagraficaIntoDocSend(importExportOptions,codiceAgente,codiceCliente,pdfFileName,emailSede,'','');
+
+
+        result:=result and ret;
+        qry.next;
+      end;
+
+    except
+      result:=false;
+    end;
+
+  finally
+    qry.free;
+  end;
+
+  if result then
+  begin
+    SetStatusBarText('Creazione documenti concluso con successo.');
+    if (docsCount>0) then
+    begin
+      OutputAddWithTime('creazione documenti concluso con successo.',rvsSubHeading,owOk);
+      AddToLog('creazione documenti concluso con successo.')
+    end
+    else
+    begin
+      OutputAddWithTime('creazione documenti concluso con successo (nessun documento da creare).',rvsSubHeading,owOk);
+      AddToLog('creazione documenti concluso con successo (nessun documento da creare).');
+    end;
+  end
+  else
+  begin
+    OutputAddWithTime('creazione documenti concluso con errori.',rvsSubHeading,owStop);
+    SetStatusBarText('Creazione documenti concluso con errori.');
+    AddToLog('creazione documenti concluso concluso con errori.')
+    SendExportErrorEmail(importExportOptions,'Creazione documenti concluso con errori.')
+  end;
+  OutputAddEmptyLine();
+end;
+
+function SendDocsPdf(importExportOptions:TImportExportOptions):boolean;
+var
+  qry:TZQuery;
+  sql:string;
+  addTimeStamp:string;
+  //codiceAgente,nomeAgente,linguaIso:string;
+  mailTo,mailCC,mailCCN:string;
+  subject,body,str:string;
+  db:TDataBase;
+  ret:boolean;
+  docsCount:integer;
+  attachments:TStringList;
+begin
+
+  if importExportOptions.docsEmailAccount.enabled=false then
+    exit;
+
+
+  str:=Format('invio documenti (versione: %s)...',[gMAILVERSION]);
+  OutputAddWithTime(str,rvsSubHeading,owInfo);
+  AddToLog(str);
+
+  try
+    db:=importExportOptions.db;
+    qry:=TZQuery.Create(nil);
+    qry.Connection:=TZConnection(db);
+    sql:='SELECT * FROM docsend WHERE sendtimestamp="" ORDER BY addTimeStamp LIMIT 0';
+    qry.SQL.Add(sql);
+
+    result:=true;
+    attachments:=TStringList.Create();
+
+    try
+      qry.Open;
+      docsCount:=qry.recordCount;
+      while not qry.eof do
+      begin
+        addTimeStamp:=qry.FieldByName('addTimeStamp').AsString;
+        mailTo:=qry.FieldByName('emailTo').AsString;
+        mailCC:=qry.FieldByName('emailCC').AsString;
+        mailCCN:=qry.FieldByName('emailCCN').AsString;
+
+
+        if DebugMode then
+        begin
+          mailTo:='andrea.righetto@nexttech.it'
+          mailCC:='';
+          mailCCN:='';
+        end;
+
+        attachments.clear;
+        attachments.text:=qry.FieldByName('attachments').AsString;
+
+        subject:=qry.FieldByName('emailSubject').AsString;
+        body:=qry.FieldByName('emailBody').AsString;
+
+        OutputAddWithIndentWithTime(Format('invio mail ''%s'' all''indirizzo %s in corso...',[subject,mailTo]),rvsNormal,owUnion);
+        SetStatusBarText(Format('Invio mail ''%s'' all''indirizzo %s in corso...',[subject,mailTo]));
+        AddToLog(Format('invio mail ''%s'' all''indirizzo %s in corso...',[subject,mailTo]));
+
+        ret:=DoSendMailEx(importExportOptions.docsEmailAccount,attachments,subject,body,mailTo,mailCC,mailCCN,'UTF8',false,false);
+
+        if ret then
+        begin
+          sql:=format('update docsend set sendtimestamp="%s" where addTimeStamp="%s"',[Gettimestamp(),addTimeStamp]);
+          db.executeSql(sql);
+
+          OutputAddNoNewLine('OK.',rvsNormal,owNoIcon);
+          AddToLog('invio mail avvenuta con successo.');
+        end
+        else
+        begin
+          OutputAddNoNewLine('NON OK.',rvsError,owNoIcon);
+          AddToLog('invio mail conclusa con errori.');
+        end;
+
+        result:=result and ret;
+        result:=ret;
+        qry.next;
+      end;
+    except
+      result:=false;
+    end;
+  finally
+    attachments.free;
+    qry.free;
+  end;
+
+  if result then
+  begin
+    SetStatusBarText('Invio documenti concluso con successo.');
+    if (docsCount>0) then
+    begin
+      OutputAddWithTime('invio documenti concluso con successo.',rvsSubHeading,owOk);
+      AddToLog('invio documenti concluso con successo.')
+    end
+    else
+    begin
+      OutputAddWithTime('invio documenti concluso con successo (nessun documento da inviare).',rvsSubHeading,owOk);
+      AddToLog('invio documenti concluso con successo (nessun documento da inviare).');
+    end;
+  end
+  else
+  begin
+    OutputAddWithTime('invio documenti concluso con errori.',rvsSubHeading,owStop);
+    SetStatusBarText('Invio documenti concluso con errori.');
+    AddToLog('invio documenti concluso concluso con errori.')
+    SendExportErrorEmail(importExportOptions,'Invio documenti concluso con errori.')
+  end;
+  OutputAddEmptyLine();
+end;
+
+{$ENDIF}
