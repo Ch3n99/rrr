@@ -1,0 +1,857 @@
+{ Version 0.1 (2006.08.04) }
+
+{$IFNDEF AF_COMMON}
+{$DEFINE AF_COMMON}
+
+{$I ..\Libs\Standard\stdLib.lib}
+
+
+// file di configurazione
+const
+  gDefaultConfigurationIni            = 'Config.ini';
+  gDebugCofigurationIni               = 'Config.debug.ini';
+  gTestCofigurationIni                = 'Config.test.ini';
+
+// password
+const
+  gCRYPTED_ACCOUNT_FILE_PASSWORD              =   'maadmin';
+  gDEFAULT_ADMIN_ACCOUNT_PASSWORD             =   'maadmin';
+
+  gACCOUNTS_FILENAME                          =   'accounts.txt';
+  gACCOUNTS_FILENAME_CRYPTED                  =   'accounts.txt';
+
+// import-export
+const
+  gFROMPC_MOVEIMPORTEDFILES                   = TRUE;  // FALSE da usare per il debugging
+  gFROMPALM_MOVEIMPORTEDFILES                 = TRUE;  // FALSE da usare per il debugging
+  gTOPC_FORCEEXPORT                           = FALSE;  // TRUE da usare per il debugging
+
+const
+  gEXPORTEDFLAG_GESTTOBA            = 0;
+  gEXPORTEDFLAG_EXPORTED_GESTTOBA   = 1;
+
+  gEXPORTEDFLAG_BATOGEST            = 2;
+  gEXPORTEDFLAG_EXPORTED_BATOGEST   = 3;
+
+  gEXPORTEDFLAG_WANOTCONFIRMED      = 4;
+  gEXPORTEDFLAG_TOALL               = 5;
+
+  gFTPUPLOAD_DEFAULTDIR             = 'upload';
+  gFTPDOWNLOAD_DEFAULTDIR           = 'download';
+  gFTPBACKUP_DEFAULTDIR             = 'upload/backup';
+
+var
+  gConfigurationIni:string;
+  gGestLockFileName,gNexttechLockFileName:string;
+
+  gGlobal_commonDefsDir,gGlobal_commonTblDir:string;
+  gInit_userDefsDir,gInit_userTblDir:string;
+  gConnectionStringDest:string;
+
+  gFromPC_import_baseDir,gFromPC_import_backupDir,gFromPC_import_errorsDir,gFromPC_import_errorEmailsErrorDir,gFromPC_import_errorEmailsOKDir,gFromPC_import_defsDir:string;
+  gToPalm_export_baseDir,gToPalm_export_backupDir,gToPalm_export_errorsDir,gToPalm_export_errorEmailsErrorDir,gToPalm_export_errorEmailsOKDir,gToPalm_export_defsDir:string;
+  gFromPalm_import_baseDir,gFromPalm_import_backupDir,gFromPalm_import_errorsDir,gFromPalm_import_errorEmailsErrorDir,gFromPalm_import_errorEmailOKDir,gFromPalm_import_defsDir:string;
+  gToPC_export_baseDir,gToPC_export_baseDir2,gToPC_export_htmlDir,gToPC_export_backupDir,gToPC_export_errorsDir,gToPC_export_errorEmailsErrorDir,gToPC_export_errorEmailsOKDir,gToPC_export_defsDir,gToPC_fax_dir:string;
+
+  gFtp1HostName,gFtp1UserName,gFtp1Password,gFtp1BaseDir:string;
+  gFtp2HostName,gFtp2UserName,gFtp2Password,gFtp2BaseDir:string;
+  gFtp1PassiveMode,gFtp2PassiveMode:boolean;
+
+  gToWeb_export_defsDir,gFromWeb_export_defsDir,gFtp_export_dir:string;
+
+  docsEmail,reportsEmail,errorsEmail:TEmailAccount;
+
+  gLastDataBaseErrorString: string;
+
+////////////////////////////////////////////////
+//                                            //
+// funzioni per import-export da PC a PALMARE //
+//                                            //
+////////////////////////////////////////////////
+
+// funzioni importazione
+function GetFromPCImportSourceAgentDirPath(codiceAgente:string):string;
+begin
+  result:=Format('%s\%s\out\',[gFromPC_import_baseDir,codiceAgente]);
+end;
+
+function GetFromPcImportAgentBackupDirPath(codiceAgente:string):string;
+begin
+  result:=format('%s\',[gFromPC_import_backupDir+codiceAgente]);
+end;
+
+// funzioni esportazione
+function GetToPalmExportTempDestinationDirPath(codiceAgente:string):string;
+begin
+    //result:=PurifyPath(Format('%s\%s\',[gToPalm_export_tempBaseDir,codiceAgente]));
+  result:=PurifyPath(Format('%s\%s\out\temp\',[gToPalm_export_baseDir,codiceAgente]));
+end;
+
+function GetToPalmExportDestinationDirPath(codiceAgente:string):string;
+begin
+   result:=PurifyPath(Format('%s\%s\out\',[gToPalm_export_baseDir,codiceAgente]));
+end;
+
+function GetToPalmExportBackupDirPath(codiceAgente:string):string;
+begin
+   result:=PurifyPath(Format('%s\%s\%s\',[gToPalm_export_backupDir,codiceAgente,GetInternationalDateTimeString(now)]));
+end;
+
+////////////////////////////////////////////////
+//                                            //
+// funzioni per import-export da PALMARE a PC //
+//                                            //
+////////////////////////////////////////////////
+
+// funzioni importazione
+function GetFromPalmImportSourceDirPath(codiceAgente:string):string;
+begin
+  result:=Format('%s\%s\in\',[gFromPalm_import_baseDir,codiceAgente]);
+end;
+
+function GetFromPalmImportBackupDirPath(codiceAgente:string):string;
+begin
+  result:=format('%s\',[gFromPalm_import_backupDir+codiceAgente]);
+end;
+
+// funzioni esportazione
+function GetToPCExportDestinationDirPath(codiceAgente:string):string;
+begin
+   result:=PurifyPath(Format('%s\%s\in\',[gToPC_export_baseDir,codiceAgente]));
+end;
+
+function GetToPCExportBackupDirPath(codiceAgente:string):string;
+begin
+   result:=PurifyPath(Format('%s\%s\',[gToPC_export_backupDir,codiceAgente]));
+end;
+
+// funzioni esportazione html
+function GetToPCExportHtmlDestinationDirPath(codiceAgente:string):string;
+begin
+   result:=PurifyPath(Format('%s\%s\',[gToPC_export_htmlDir,codiceAgente]));
+end;
+
+
+
+////////////////////////////////////////////////
+//                                            //
+// funzioni varie                             //
+//                                            //
+////////////////////////////////////////////////
+
+function InitOptions():boolean;
+var
+  ini:TIniFile;
+  str:string;
+begin
+  if DebugMode then
+    gConfigurationIni:=gDebugCofigurationIni
+  else if FileExists('TestHosts.ini') then
+  begin
+    gConfigurationIni:=gTestCofigurationIni;
+  end
+  else
+    gConfigurationIni:=gDefaultConfigurationIni;
+
+  result:=false;
+  if not FileExists(gConfigurationIni) then
+  begin
+    MessageDialog(Format('File di configurazione "%s" non trovato. La procedura verrà terminata.',[gConfigurationIni]),mtError,[mbOk]);
+    AddToLog(Format('File di configurazione "%s" non trovato.',[gConfigurationIni]));
+    exit;
+  end;
+
+  try
+    try
+      ini:=TIniFile.Create(GetApplicationPath()+gConfigurationIni);
+
+      // file di lock
+      gGestLockFileName                     :=  ini.ReadString('Gest','GestLock','');
+      gNexttechLockFileName                 :=  ini.ReadString('Lock','NextTech','');
+
+      // Global
+      gGlobal_commonDefsdir                 :=  ini.ReadString('Global','DefsDir','');
+      gGlobal_commonTblDir                  :=  ini.ReadString('Global','DataDir','');
+
+      // User
+      gInit_userDefsDir                     :=  ini.ReadString('User','DefsDir','');
+      gInit_UserTblDir                      :=  ini.ReadString('User','DataDir','');
+
+      //Connection String
+      gConnectionStringDest                 :=  ini.ReadString('DB','DbConnectionString_WEB','');
+
+      //Web
+      gToWeb_export_defsDir                :=  ini.ReadString('Web','ToWebDefsDir','');
+      gFromWeb_export_defsDir                :=  ini.ReadString('Web','FromWebDefsDir','');
+
+      // fromPC
+      gFromPC_import_baseDir                :=  ini.ReadString('FromPC','ImportDir','');
+      gFromPC_import_backupDir              :=  ini.ReadString('FromPC','BackupDir','');
+      gFromPC_import_errorsDir              :=  ini.ReadString('FromPC','ErrorsDir','');
+      gFromPC_import_errorEmailsErrorDir    :=  ini.ReadString('FromPC','ErrorsEmailErrorDir','');
+      gFromPC_import_errorEmailsOKDir    :=  ini.ReadString('FromPC','ErrorsEmailOKDir','');
+      gFromPC_import_defsDir                :=  ini.ReadString('FromPC','DefsDir','');
+
+      // toPalm
+      gToPalm_export_baseDir                :=  ini.ReadString('ToPalm','ExportDir','');
+      gToPalm_export_backupDir              :=  ini.ReadString('ToPalm','BackupDir','');
+      gToPalm_export_errorsDir              :=  ini.ReadString('ToPalm','ErrorsDir','');
+      gToPalm_export_errorEmailsErrorDir    :=  ini.ReadString('ToPalm','ErrorsEmailErrorDir','');
+      gToPalm_export_errorEmailsOKDir    :=  ini.ReadString('ToPalm','ErrorsEmailOKDir','');
+      gToPalm_export_defsDir                :=  ini.ReadString('ToPalm','DefsDir','');
+
+      // fromPalm
+      gFromPalm_import_baseDir              :=  ini.ReadString('FromPalm','ImportDir','');
+      gFromPalm_import_backupDir            :=  ini.ReadString('FromPalm','BackupDir','');
+      gFromPalm_import_errorsDir            :=  ini.ReadString('FromPalm','ErrorsDir','');
+      gFromPalm_import_errorEmailsErrorDir  :=  ini.ReadString('FromPalm','ErrorsEmailErrorDir','');
+      gFromPalm_import_errorEmailOKDir      :=  ini.ReadString('FromPalm','ErrorsEmailOKDir','');
+      gFromPalm_import_defsDir              :=  ini.ReadString('FromPalm','DefsDir','');
+
+      // toPC
+      gToPC_export_baseDir                  :=  ini.ReadString('ToPc','ExportDir','');
+      gToPC_export_baseDir2                  :=  ini.ReadString('ToPc','ExportDir2','');
+      gToPC_export_htmlDir                  :=  ini.ReadString('ToPc','HtmlDir','');
+      gToPC_export_backupDir                :=  ini.ReadString('ToPc','BackupDir','');
+      gToPC_export_errorsDir                :=  ini.ReadString('ToPc','ErrorsDir','');
+      gToPC_export_errorEmailsErrorDir      :=  ini.ReadString('ToPc','ErrorsEmailErrorDir','');
+      gToPC_export_errorEmailsOKDir         :=  ini.ReadString('ToPc','ErrorsEmailOKDir','');
+      gToPC_export_defsDir                  :=  ini.ReadString('ToPc','DefsDir','');
+      gToPC_fax_dir                         :=  ini.ReadString('ToPc','FaxDir','');
+      gFtp_export_dir                       :=  ini.ReadString('ToPc','FtpExportDir','');
+
+      // Ftp
+      gFtp1HostName                         :=  ini.ReadString('Ftp','HostName1','');
+      gFtp1UserName                         :=  ini.ReadString('Ftp','UserName1','');
+      gFtp1Password                         :=  ini.ReadString('Ftp','Password1','');
+      gFtp1BaseDir                          :=  ini.ReadString('Ftp','BaseDir1','');
+      gFtp1PassiveMode                      :=  ini.ReadBool('Ftp','PassiveMode',true);
+
+      gFtp2HostName                         :=  ini.ReadString('Ftp','HostName2','');
+      gFtp2UserName                         :=  ini.ReadString('Ftp','UserName2','');
+      gFtp2Password                         :=  ini.ReadString('Ftp','Password2','');
+      gFtp2BaseDir                          :=  ini.ReadString('Ftp','BaseDir2','');
+      gFtp2PassiveMode                      :=  ini.ReadBool('Ftp','PassiveMode',true);
+
+      // Email
+      docsEmail.enabled                     :=  ini.ReadBool('Email','Enabled',true);
+      docsEmail.host				                :=  ini.ReadString('Email','SmtpHost','');
+      docsEmail.user                        :=  ini.ReadString('Email','User','');
+      docsEmail.pwd                         :=  ini.ReadString('Email','Password','');
+      docsEmail.fromName                    :=  ini.ReadString('Email','FromName','');
+      docsEmail.fromAddress                 :=  ini.ReadString('Email','FromAddress','');
+
+      docsEmail.port                        :=  ini.ReadString('Email','Port','smtp');
+      docsEmail.retryCount                  :=  ini.ReadInteger('Email','RetryCount',5);
+      docsEmail.retrySecs                   :=  ini.ReadInteger('Email','RetrySecs',60);
+      docsEmail.defaultTo                   :=  ini.ReadString('Email','DefaultTo','');
+      docsEmail.defaultCC                   :=  ini.ReadString('Email','DefaultCC','');
+      docsEmail.defaultCCN                  :=  ini.ReadString('Email','DefaultCCN','');
+
+      // reports email
+      reportsEmail.enabled                  :=  ini.ReadBool('ReportsEmail','Enabled',true);
+      reportsEmail.host				              :=  ini.ReadString('ReportsEmail','SmtpHost','');
+      reportsEmail.user                     :=  ini.ReadString('ReportsEmail','User','');
+      reportsEmail.pwd                      :=  ini.ReadString('ReportsEmail','Password','');
+      reportsEmail.fromName                 :=  ini.ReadString('ReportsEmail','FromName','');
+      reportsEmail.fromAddress              :=  ini.ReadString('ReportsEmail','FromAddress','');
+
+      reportsEmail.port                     :=  ini.ReadString('ReportsEmail','Port','smtp');
+      reportsEmail.retryCount               :=  ini.ReadInteger('ReportsEmail','RetryCount',5);
+      reportsEmail.retrySecs                :=  ini.ReadInteger('ReportsEmail','RetrySecs',60);
+      reportsEmail.defaultTo                :=  ini.ReadString('ReportsEmail','DefaultTo','');
+      reportsEmail.defaultCC                :=  ini.ReadString('ReportsEmail','DefaultCC','');
+      reportsEmail.defaultCCN               :=  ini.ReadString('ReportsEmail','DefaultCCN','');
+
+      // ErrorEmail
+      errorsEmail.enabled                   :=  ini.ReadBool('ErrorEmail','Enabled',true);
+      errorsEmail.host				              :=  ini.ReadString('ErrorEmail','SmtpHost','');
+      errorsEmail.fromName                  :=  ini.ReadString('ErrorEmail','FromName','');
+      errorsEmail.fromAddress               :=  ini.ReadString('ErrorEmail','FromAddress','');
+      errorsEmail.user                      :=  ini.ReadString('ErrorEmail','User','');
+      errorsEmail.pwd                       :=  ini.ReadString('ErrorEmail','Password','');
+      errorsEmail.port                      :=  ini.ReadString('ErrorEmail','Port','smtp');
+      errorsEmail.retryCount                :=  ini.ReadInteger('ErrorEmail','RetryCount',5);
+      errorsEmail.retrySecs                 :=  ini.ReadInteger('ErrorEmail','RetrySecs',60);
+      errorsEmail.defaultTo                 :=  ini.ReadString('ErrorEmail','DefaultTo','');
+      errorsEmail.defaultCC                 :=  ini.ReadString('ErrorEmail','DefaultCC','');
+      errorsEmail.defaultCCN                :=  ini.ReadString('ErrorEmail','DefaultCCN','');
+
+
+      // init dirs
+      ForceDirectories(gFromPC_import_baseDir);
+      ForceDirectories(gFromPC_import_backupDir);
+      ForceDirectories(gFromPC_import_errorsDir);
+      ForceDirectories(gFromPC_import_errorEmailsErrorDir);
+      ForceDirectories(gFromPC_import_errorEmailsOKDir);
+      ForceDirectories(gFromPC_import_defsDir);
+
+      ForceDirectories(gToPalm_export_baseDir);
+      ForceDirectories(gToPalm_export_backupDir);
+      ForceDirectories(gToPalm_export_errorsDir);
+      ForceDirectories(gToPalm_export_errorEmailsErrorDir);
+      ForceDirectories(gToPalm_export_errorEmailsOKDir);
+      ForceDirectories(gToPalm_export_defsDir);
+
+      ForceDirectories(gFromPalm_import_baseDir);
+      ForceDirectories(gFromPalm_import_backupDir);
+      ForceDirectories(gFromPalm_import_errorsDir);
+      ForceDirectories(gFromPalm_import_errorEmailsErrorDir);
+      ForceDirectories(gFromPalm_import_errorEmailOKDir);
+      ForceDirectories(gFromPalm_import_defsDir);
+
+      ForceDirectories(gToPC_export_baseDir);
+      ForceDirectories(gToPC_export_htmlDir);
+      ForceDirectories(gToPC_export_backupDir);
+      ForceDirectories(gToPC_export_errorsDir);
+      ForceDirectories(gToPC_export_errorEmailsErrorDir);
+      ForceDirectories(gToPC_export_errorEmailsOKDir);
+      ForceDirectories(gToPC_export_defsDir);
+
+      result:=true;
+    except
+      str:=Format('Exception: %s',[GetExceptionsString()]);
+      MessageDialog(str,mtError,[mbOk]);
+      AddToLog(str);
+      result:=false;
+    end;
+  finally
+    ini.free;
+  end;
+end;
+
+function FillAgentList(db:TDataBase;agentsList:TStringList):integer;
+var
+  qry:TZQuery;
+begin
+  result:=-1;
+  if agentsList=nil then
+    exit;
+
+  agentsList.clear;
+  qry:=TZQuery.Create(nil);
+  try
+    qry.Connection:=TZConnection(db);
+    qry.sql.Add('select distinct codiceAgente from anagrage order by codiceAgente');
+    qry.Open;
+
+    while not qry.eof do
+    begin
+      agentsList.Add(qry.FieldByName('codiceAgente').AsString);
+      qry.Next;
+    end;
+  finally
+    qry.free;
+  end;
+
+  result:=agentsList.count;
+end;
+
+function FillAgentList_PR(db:TDataBase;agentsList:TStringList):integer;
+var
+  qry:TZQuery;
+begin
+  result:=-1;
+  if agentsList=nil then
+    exit;
+
+  agentsList.clear;
+  qry:=TZQuery.Create(nil);
+  try
+    qry.Connection:=TZConnection(db);
+    qry.sql.Add('select distinct trim(codice) as codiceAgente from utenti_marketing order by codice ');
+    qry.Open;
+
+    while not qry.eof do
+    begin
+      agentsList.Add(qry.FieldByName('codiceAgente').AsString);
+      qry.Next;
+    end;
+  finally
+    qry.free;
+  end;
+
+  result:=agentsList.count;
+end;
+
+function FillAgentList_Fiera(db:TDataBase;agentsList:TStringList):integer;
+var
+  qry:TZQuery;
+begin
+  result:=-1;
+  if agentsList=nil then
+    exit;
+
+  //agentsList.clear;
+  qry:=TZQuery.Create(nil);
+  try
+    qry.Connection:=TZConnection(db);
+    qry.sql.Add('SELECT DISTINCT AgenteFiera FROM agenti_fiera ORDER BY AgenteFiera');
+    qry.Open;
+
+    while not qry.eof do
+    begin
+      agentsList.Add(qry.FieldByName('AgenteFiera').AsString);
+      qry.Next;
+    end;
+  finally
+    qry.free;
+  end;
+
+  result:=agentsList.count;
+end;
+
+function IsNewAgent(db:TDataBase;agentCode:string):boolean;
+var
+  qry:TZQuery;
+begin
+  qry:=TZQuery.Create(nil);
+  qry.Connection:=TZConnection(db);
+  qry.SQL.Add(Format('select * from causali where codiceAgente="%s"',[agentCode]));
+
+  try
+    qry.Open;
+    result:=qry.RecordCount=0;
+  except
+    result:=false;
+  end;
+  qry.free;
+end;
+
+
+
+function SendErrorMail(subject:string;backupDir,errorDir:string):boolean;
+begin
+
+  result:=false;
+  if not errorsEmail.enabled then exit;
+  if trim(errorsEmail.host)='' then exit;
+
+  MailNew(true,true,false);
+  MailSetHost(errorsEmail.host);
+  MailSetPort(errorsEmail.port);
+  MailSetRetryCount(errorsEmail.retryCount);
+  MailSetRetrySecs(errorsEmail.retrySecs);
+
+  MailSetFromName(errorsEmail.fromName);
+  MailSetFromAddress(errorsEmail.fromAddress);
+
+  MailSetTo(errorsEmail.defaultTo);
+  MailSetCC(errorsEmail.defaultCC);
+  MailSetCCN(errorsEmail.defaultCCN);
+  MailSetPriority(smtpPriorityHighest);
+
+  MailSetSubject(subject + '[AF EU]');
+  MailSetBodyFromFile(GetLogFilename());
+  //MailAddAttach('');
+  MailSetBackupDir(backupDir);
+  MailSetErrorsDir(errorDir);
+  result:=MailSend();
+  MailEnd();
+end;
+
+function SendFromPcErrorEmail():boolean;
+begin
+  result:=true;
+  if errorsEmail.enabled then
+    result:=SendErrorMail('Importazione dati da gestionale avvenuta con errori.',gFromPC_import_errorEmailsOKDir,gFromPC_import_errorEmailsErrorDir);
+end;
+
+function SendToPalmErrorEmail():boolean;
+begin
+  result:=true;
+    if errorsEmail.enabled then
+  result:=SendErrorMail('Esportazione dati per Business Agent avvenuta con errori.',gToPalm_export_errorEmailsOKDir,gToPalm_export_errorEmailsErrorDir);
+end;
+
+function SendFromPalmErrorEmail():boolean;
+begin
+  result:=true;
+  if errorsEmail.enabled then
+    result:=SendErrorMail('Importazione dati da Business Agent (PalmToPc) avvenuta con errori.',gFromPalm_import_errorEmailOKDir,gFromPalm_import_errorEmailsErrorDir);
+end;
+
+function SendToPCErrorEmail():boolean;
+begin
+  result:=true;
+  if errorsEmail.enabled then
+    result:=SendErrorMail('Esportazione dati per gestionale avvenuta con errori.',gToPC_export_errorEmailsOKDir,gToPC_export_errorEmailsErrorDir);
+end;
+
+procedure CreateTables(db:TDataBase;sourceDir:string;createExportField:boolean);
+var
+  dirList:TStringList;
+  tblName:string;
+  i:integer;
+begin
+  dirList:=TStringList.Create();
+
+  try
+    BuildFileList(sourceDir+'\*.def',faAnyFile,dirList);
+
+    for i:=0 to dirList.Count-1 do
+    begin
+      tblName:=PathRemoveExtension(dirList[i]);
+      db.CreateTableFromDef(sourceDir+'\'+dirList[i],tblName,false,createExportField);
+   end;
+  finally
+    dirList.free;
+  end;
+end;
+
+function GetLinguaFromOrgComm(orgComm:string):string;
+begin
+  result:='en';
+  orgComm:=uppercase(orgComm);
+
+  if(orgComm='IA01') or (orgComm='ZI01') then result:='IT';
+  if(orgComm='EA01') then result:='ES';
+  if(orgComm='DA01') then result:='DE';
+  if(orgComm='FA01') or (orgComm='ZF01') then result:='FR';
+  if(orgComm='PA01') then result:='PT';
+  if(orgComm='BA01') then result:='PT';
+end;
+
+function FullExecuteSql(db: TDatabase; sql: string): boolean;
+begin
+  try
+    db.ExecuteSqlExc(sql);
+    result := true;
+  except
+    result := false;
+    gLastDataBaseErrorString := GetExceptionsString();
+  end;
+end;
+
+function ExistsTable(db: TDatabase; tblName: string): boolean;
+var
+  qry: TZQuery;
+  sql: string;
+begin
+  qry := TZQuery.Create(nil);
+  try
+	  qry.Connection := TZConnection(db);
+
+	  sql := Format('select * from %s where 1=0', [tblName]);
+	  qry.SQL.text := sql;
+
+	  result := false;
+	  try
+	    qry.Open;
+	    result := true;
+	  except
+	  end;
+	finally
+  	qry.free;
+  end;
+end;
+
+function CopyTableEx(db: TDatabase; srcTable, dstTable: string; whereCondition: string; optimize: boolean; createFromSrc: boolean): boolean;
+var
+  originalDstTable, dstTableTmp, dstTableBak, sql: string;
+  bExistsDst: boolean;
+begin
+  optimize := false; // per adesso sempre false. C'e' qualche problemino
+
+  originalDstTable := dstTable;
+  bExistsDst := ExistsTable(db, dstTable);
+  whereCondition := trim(whereCondition);
+
+  if bExistsDst then
+  begin
+    dstTableTmp := dstTable + '_tmp';
+
+    sql := Format('drop table %s', [dstTableTmp]);
+    db.ExecuteSql(sql);
+
+    if createFromSrc then
+      sql := Format('create table %s like %s', [dstTableTmp, srcTable])
+    else
+      sql := Format('create table %s like %s', [dstTableTmp, dstTable]);
+    result := FullExecuteSql(db, sql);
+  end
+  else
+  begin
+    dstTableTmp := dstTable;
+
+    sql := Format('create table %s like %s', [dstTableTmp, srcTable]);
+    result := FullExecuteSql(db, sql);
+  end;
+
+  if not result then
+    exit;
+
+  if optimize then
+  begin
+    FullExecuteSql(db, Format('ALTER TABLE %s DISABLE KEYS', [dstTableTmp]));
+    FullExecuteSql(db, 'SET FOREIGN_KEY_CHECKS = 0');
+    FullExecuteSql(db, 'SET UNIQUE_CHECKS = 0');
+    FullExecuteSql(db, 'SET AUTOCOMMIT = 0');
+  end;
+
+  sql := Format('insert into %s select * from %s ', [dstTableTmp, srcTable]);
+  if whereCondition <> '' then
+    sql := sql + 'where ' + whereCondition;
+
+  result := FullExecuteSql(db, sql);
+
+  if result then
+  begin
+    if optimize then
+    begin
+      FullExecuteSql(db, 'SET FOREIGN_KEY_CHECKS = 1');
+      FullExecuteSql(db, 'SET UNIQUE_CHECKS = 1');
+      FullExecuteSql(db, 'COMMIT');
+      FullExecuteSql(db, Format('ALTER TABLE %s ENABLE KEYS', [dstTableTmp]));
+    end;
+
+    if bExistsDst then
+    begin
+      dstTableBak := originalDstTable + '_bak';
+      sql := Format('RENAME TABLE %s TO %s, %s TO %s', [dstTable, dstTableBak, dstTableTmp, dstTable]);
+      result := FullExecuteSql(db, sql);
+
+      if result then
+      begin
+        sql := Format('drop table %s', [dstTableBak]);
+        FullExecuteSql(db, sql);
+      end;
+    end;
+  end
+  else
+  begin
+    sql := Format('drop table %s', [dstTableTmp]);
+    FullExecuteSql(db, sql);
+  end;
+end;
+
+function DuplicateTable(db: TDatabase; srcTableName, dstTableName: string; createFromSrc: boolean): boolean;
+begin
+  OutputAddWithIndentWithTime(Format('copia tabella "%s" -> "%s"...', [srcTableName, dstTableName]), rvsNormal, owRoundArrowRight);
+  AddToLog(Format('copia tabella "%s"...', [srcTableName]));
+  SetStatusBarText(Format('copia tabella "%s"...', [srcTableName]));
+
+  result := CopyTableEx(db, srcTableName, dstTableName, '', true, createFromSrc);
+
+  if result then
+  begin
+    OutputAddNoNewLine('OK.', rvsNormal, owNoIcon);
+    AddToLog(Format('copia tabella "%s"...OK.', [srcTableName]));
+    SetStatusBarText(Format('copia tabella "%s"...OK', [srcTableName]));
+  end
+  else
+  begin
+    OutputAddNoNewLine(Format('NON OK [%s].', [gLastDataBaseErrorString]), rvsError, owNoIcon);
+    AddToLog(Format('copia tabella "%s"...NON OK [%s].', [srcTableName, gLastDataBaseErrorString]));
+    SetStatusBarText(Format('copia tabella "%s"...NON OK', [srcTableName]));
+  end;
+end;
+
+Function MySql_CopyQueryToTable_new(db_src: TDatabase; sqlQuery, defFileName: string; db_dst: TDatabase; dstTable: string; bNativeCopy: boolean; verbose: boolean; dropDest:boolean): boolean;
+var
+  tmpDir, tmpDestFileName, tmpTableDefFileName, sql: string;
+  s, tmpTable: string;
+  nCurrentStep, nTotalSteps: integer;
+  bOldShowOutput: boolean;
+begin
+  result := false;
+
+  s := Format('copia dati dal database "%s" (%s) a "%s" nel database "%s" (%s)...',
+    [db_src.database, db_src.HostName, dstTable, db_dst.database, db_dst.HostName]);
+  if verbose then
+    OutputAddWithTime(s, rvsKeyword, owDiagram2);
+  AddToLog(s);
+
+  bOldShowOutput := db_src.ShowOutput;
+  db_src.ShowOutput := false;
+
+  tmpDir := ExtractFilePath(application.ExeName) + 'tmp\export\';
+  ForceDirectories(tmpDir);
+
+  tmpDestFileName := _MySql_DBDataCopy_GetTempFileName(tmpDir + dstTable + '.txt');
+  tmpTableDefFileName := '';
+
+  try
+    nCurrentStep := 1;
+    nTotalSteps := 3;
+
+    // preparazione tabelle
+    /////////////////////////////////////////////////////////////
+
+    // elimino la tabella di destinazione (temporanea)
+    if dropDest then
+    begin
+      tmpTable := gTempTablePrefix + dstTable;
+      sql := Format('DROP TABLE `%s`', [tmpTable]);
+      db_dst.ExecuteSql(sql);
+
+      // creo la tabella di destinazione (temporanea)
+      db_dst.CreateTableFromDef(defFileName, tmpTable, false, false);
+    end
+    else
+    begin
+      tmpTable:=dstTable;
+      if (not db_dst.ExistsTable(tmpTable)) then
+        db_dst.CreateTableFromDef(defFileName,tmpTable,false,false);
+    end;
+
+
+    // esporta in un file temporaneo (passo 1)
+    /////////////////////////////////////////////////////////////
+    _MySql_DBDataCopy_WriteInfo(witImport, tmpDestFileName, dstTable);
+
+    // creo il def che mi serve per l'esportazione NON nativo
+    if not bNativeCopy then
+    begin
+      tmpTableDefFileName:=tmpDir+dstTable+'.def';
+      _MySql_DBDataCopy_CreateDefFromQuery(db_src,sqlQuery,tmpTableDefFileName);
+    end;
+
+    try
+      if bNativeCopy then
+      begin
+        MySql_NativeExportData(db_src, tmpDestFileName, true, sqlQuery, gDefaultSeparator);
+        result:=true; //altrimenti eccezione
+      end
+      else
+      begin
+        db_src.AddToExport(tmpDestFileName, tmpTableDefFileName, sqlQuery, dstTable, nil, true, ieftAutomatic);
+        db_src.StartExport();
+        result := db_src.LastErrorType = etNoErrors;
+      end;
+
+      if verbose then
+        OutputAddNoNewLine('.', rvsNormal, owNoIcon);
+      application.processMessages;
+
+      if FileSize(tmpDestFileName) > 0 then
+      begin
+        MySql_NativeImportData(db_dst, tmpDestFileName, true, tmpTable, gDefaultSeparator, '', 0, '', true, nil);
+        application.processMessages;
+      end;
+    except
+      _MySql_DBDataCopy_WriteInfo(witOpNonOk, tmpDestFileName, dstTable);
+      exit;
+    end;
+
+    if not result then
+    begin
+      _MySql_DBDataCopy_WriteInfo(witOpNonOk, tmpDestFileName, dstTable);
+      exit;
+    end;
+
+    _MySql_DBDataCopy_WriteInfo(witOpOk, tmpDestFileName, dstTable);
+    inc(nCurrentStep);
+
+    // applicazione modifiche (passo 3)
+    /////////////////////////////////////////////////////////////
+    if dropDest then
+    begin
+      _MySql_DBDataCopy_WriteInfo(witApplyChanges, tmpDestFileName, dstTable);
+
+      //tableBak := dstTable + '_bak';
+      //sql := Format('DROP TABLE %s', [tableBak]);
+      //db_dst.ExecuteSql(sql);
+
+      if db_dst.ExistsTable(dstTable) then
+      begin
+        sql := Format('drop table %s', [dstTable]);
+        result := db_dst.ExecuteSql(sql);
+      end;
+
+      sql := Format('rename table %s to %s', [tmpTable, dstTable]);
+      result := db_dst.ExecuteSql(sql);
+
+      if not result then
+      begin
+        _MySql_DBDataCopy_WriteInfo(witOpNonOk, tmpDestFileName, dstTable);
+        exit;
+      end;
+
+      _MySql_DBDataCopy_WriteInfo(witOpOk, tmpDestFileName, dstTable);
+      inc(nCurrentStep);
+    end;
+
+    if bNativeCopy then
+      _MySql_DBDataCopy_AppendToLog(db_dst, dstTable, 'Table copy (export type: NATIVE, import type: NATIVE)')
+    else
+      _MySql_DBDataCopy_AppendToLog(db_dst, dstTable, 'Table copy (export type: AUTOFILTER, import type: NATIVE)');
+
+    result := true;
+  finally
+    db_src.ShowOutput := bOldShowOutput;
+
+    if result then
+    begin
+      DeleteFile(tmpDestFileName);
+
+      if tmpTableDefFileName <> '' then
+        DeleteFile(tmpTableDefFileName);
+
+      s := 'copia conclusa con successo.';
+      if verbose then
+        OutputAddWithTime(s, rvsInfo, owInfo);
+    end
+    else
+    begin
+      s := 'copia conclusa con errori.';
+      if verbose then
+        OutputAddWithTime(s, rvsError, owStop);
+    end;
+    AddToLog(s);
+
+    if verbose then
+      OutputAddEmptyLine()
+  end;
+end;
+
+function CompareTextFilesEx(filename1, filename2: string; caseSensitive: boolean; notinfile1filename, notinfile2filename: string; visible, fast: boolean; var exitCode: integer): boolean;
+var
+  commandLine: string;
+begin
+  commandLine := 'External\TextFilesDiff.exe';
+  commandLine := commandLine + format(' -f1:"%s"', [filename1]);
+  commandLine := commandLine + format(' -f2:"%s"', [filename2]);
+
+  if notinfile1filename <> '' then
+    commandLine := commandLine + format(' -nf1:"%s"', [notinfile1filename]);
+
+  if notinfile2filename <> '' then
+    commandLine := commandLine + format(' -nf2:"%s"', [notinfile2filename]);
+
+  if caseSensitive then
+    commandLine := commandLine + ' -cs:true'
+  else
+    commandLine := commandLine + ' -cs:false';
+
+  if fast then
+    commandLine := commandLine + ' -f:true'
+  else
+    commandLine := commandLine + ' -f:false';
+
+  exitCode := -1;
+  result := CreateProcess_(commandLine, true, visible, exitCode);
+  if result then
+    result := exitCode = 0;
+end;
+
+function FileCompareExport(filename1, filename2, codiceagente: string): boolean;
+var
+  exitCode: integer;
+begin
+  result:=false;
+  if FileExists(filename1) and FileExists(filename2) then
+  begin
+    CompareTextFilesEx(filename1, filename2, true, 'Tmp\diff\'+codiceagente+'\'+ExtractFileName(filename1)+'.1.diff', 'Tmp\diff\'+codiceagente+'\'+ExtractFileName(filename2)+'.2.diff', false, true, exitCode);
+    if exitCode = 0 then
+    begin
+    //result:=((FileSize('Tmp\diff\'+filename1+'.diff')=0) and (FileSize('Tmp\diff\'+filename2+'.diff')=0));
+      result:=((FileSize('Tmp\diff\'+codiceagente+'\'+ExtractFileName(filename1)+'.1.diff')=0) and (FileSize('Tmp\diff\'+codiceagente+'\'+ExtractFileName(filename2)+'.2.diff')=0));
+    end;
+    DeleteFile('Tmp\diff\'+codiceagente+'\'+ExtractFileName(filename1)+'.1.diff');
+    DeleteFile('Tmp\diff\'+codiceagente+'\'+ExtractFileName(filename2)+'.2.diff');
+  end;
+end;
+
+
+{$ENDIF}
