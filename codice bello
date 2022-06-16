@@ -1,0 +1,428 @@
+{ Script import da gestionale verso dispositivi mobili}
+
+{$I ..\..\Common\Common.lib}
+{$I _importEvents.lib}
+const
+  gABILITALISTINIVARI=false;
+  gABILITALISTINIOUTLETMERGE=true;
+
+function UpdateTables(importExportOptions:TImportExportOptions):boolean;
+var
+  sql:string;
+  sqlList:TStringList;
+  db:TDataBase;
+
+  settoreModified,agentiSettoreModified,prodottiModified,listinoModified,clientiSettoreAgenteModified:boolean;
+  sceltaProdottiModified,cliProModified:boolean;
+  b2b_clientiLineeModified,b2b_settore:boolean;
+  b2b_listinoModified,b2b_modelliModified,b2b_cliProModified,tmp_lastorderModified:boolean;
+  //nomeTabella:string;
+  force:boolean;
+begin
+  result:=true;
+
+  sqlList:=TStringList.create;
+
+  db:=importExportOptions.db;
+
+  force:=false;
+
+  settoreModified:=IsModified(db,'SETTORE',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  agentiSettoreModified:=IsModified(db,'AGENTISETTORE',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  prodottiModified:=IsModified(db,'_PRODOTTI',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  listinoModified:=IsModified(db,'LISTINO',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  clientiSettoreAgenteModified:=IsModified(db,'CLIENTISETTOREAGENTE',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  sceltaProdottiModified:=IsModified(db,'SCELTAPRODOTTI',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  cliProModified:=IsModified(db,'CLI_PRO',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  b2b_clientiLineeModified:=IsModified(db,'B2B_CLIENTILINEE',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  b2b_settore:=IsModified(db,'B2B_SETTORE',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+
+  b2b_listinoModified:=IsModified(db,'B2B_LISTINO',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  b2b_modelliModified:=IsModified(db,'B2B_MODELLI',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  b2b_cliProModified:=IsModified(db,'B2B_CLI_PRO',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+  tmp_lastorderModified:=IsModified(db,'TMP_LASTORDER',gEXPORTEDFLAG_GESTTOMOBILE) or force;
+
+  //2018.01.25
+  if gABILITALISTINIVARI then
+  begin
+    //ExecuteSqlFile(db,'defs\tognana listino futuro.sql');
+    ExecuteSqlFile(db,'defs\tognana listino outlet.sql');
+  end;
+
+  //2018.01.25 end
+
+  if gABILITALISTINIOUTLETMERGE then
+  begin
+    ExecuteSqlFile(db,'defs\tognana listino outlet misto.sql');
+  end;
+
+  //2018.01.25 end
+
+  //2017.10.09
+  sql:='replace into b2b_prodottiaux ';
+  sql:=sql+'select * from b2b_prodottiauxpart';
+  result:=db.executesql(sql) and result;
+  if result then
+  begin
+    sql:='delete from b2b_prodottiauxpart';
+    result:=db.executesql(sql) and result;
+  end;
+  //fine 2017.03.27
+
+  sql:='replace into flogin_codicerif select CodiceCliente,CodiceSpedizione,piva from client';
+  importExportOptions.db.executesql(sql);
+
+  if sceltaProdottiModified then
+  begin
+    sqlList.clear();
+
+    sql:='SELECT DISTINCT codicearticolo,RIGHT(CONCAT(CONCAT(Magazzino,": ",GROUP_CONCAT(CONCAT(scelta,"=",giacenza,descAgg) ORDER BY scelta)), ';
+    sql:=sql+'IF (Magazzino2<>"",(CONCAT("|",Magazzino2,": ",GROUP_CONCAT(CONCAT(scelta,"=",giacenza2,descAgg2) ORDER BY scelta))),"")),75) AS descrizioneAggiuntiva2 ';
+    sql:=sql+'FROM '; 
+    sql:=sql+'(SELECT DISTINCT  codicearticolo,scelta, '; 
+    sql:=sql+'Magazzino, ';
+    sql:=sql+'IF(QuantitaInArrivo<>0, '; 
+    sql:=sql+'CONCAT(" (",QuantitaInArrivo,"->",SUBSTRING(dataarrivo,7,2),"/",SUBSTRING(dataarrivo,5,2),"/",SUBSTRING(dataarrivo,3,2),")"),"") AS descAgg, '; 
+    sql:=sql+'QuantitaInArrivo,dataarrivo,MAX(giacenza) AS giacenza, ';
+
+    sql:=sql+'Magazzino2, ';
+    sql:=sql+'IF(QuantitaInArrivo2<>0, '; 
+    sql:=sql+'CONCAT(" (",QuantitaInArrivo2,"->",SUBSTRING(dataarrivo2,7,2),"/",SUBSTRING(dataarrivo2,5,2),"/",SUBSTRING(dataarrivo2,3,2),")"),"") AS descAgg2, '; 
+    sql:=sql+'QuantitaInArrivo2,dataarrivo2,MAX(giacenza2) AS giacenza2 ';
+    sql:=sql+'FROM sceltaprodotti GROUP BY codicearticolo,scelta ';
+    sql:=sql+')  AS sceltaprodotti_ ';
+    sql:=sql+'GROUP BY codicearticolo '; 
+    
+    sqlList.add(sql);
+
+    result:=result and SqlToTable(importExportOptions.db,sqlList,'giacenzaprodotti');
+
+    sqlList.clear();
+
+    sql:='SELECT DISTINCT CodiceSettore, codicearticolo, ';
+    sql:=sql+'DescrizioneGiacenzaMagazzino AS descrizioneAggiuntiva2 ';
+    sql:=sql+'FROM sceltaprodotti ';
+    sql:=sql+'WHERE DescrizioneGiacenzaMagazzino <> "" ';
+    sql:=sql+'GROUP BY CodiceSettore,CodiceArticolo ';
+
+    sqlList.add(sql);
+
+    result:=result and SqlToTable(importExportOptions.db,sqlList,'giacenzaprodotti_new');
+  end;
+
+  if settoreModified or prodottiModified or listinoModified or sceltaProdottiModified or cliProModified then
+  begin
+    sqlList.clear();
+
+    sql:='SELECT ';
+    sql:=sql+'_prodotti.codicearticolo, ';
+    sql:=sql+'_prodotti.descrizioneProdotto, ';
+    sql:=sql+'prezzo AS Prezzo1, ';
+    sql:=sql+'pezziImballo1 AS PCX1, ';
+    sql:=sql+'IF (FlagNetto="1",0,settore.sconto1) AS Sconto1_1, ';
+    sql:=sql+'IF (FlagNetto="1",0,settore.sconto2) AS Sconto2_1, ';
+    sql:=sql+'0 AS Sconto3_1, ';
+    sql:=sql+'FlagModificaPrezzo AS FlagNetto, ';
+    sql:=sql+'8 AS FlagAbilitazione, ';
+    sql:=sql+'giacenzaprodotti.giacenza AS DescrizioneAggiuntiva, ';
+    sql:=sql+'listino.codicesettore AS linea,lingua, "" as filtroClienti,';
+    sql:=sql+'_prodotti.CodiceEAN AS CodiceEAN, ';
+    sql:=sql+'concat(_prodotti.descrizioneProdotto,_prodotti.descrizioneProdottoAggiuntiva) as descrizioneProdottoLunga, ';
+    sql:=sql+'LastCodeEan as LastCodeEan, ';
+    sql:=sql+'PezziInner, ';
+    sql:=sql+'PezziMaster, ';
+    sql:=sql+'giacenzaprodotti_new.Giacenza AS DescrizioneAggiuntivaNew, ';
+    sql:=sql+'IF (_prodotti_exported_=0 OR listino_exported_=0 OR settore_exported_=0,0,1) as prodotti_exported_ ';
+    sql:=sql+'FROM _prodotti ';
+    sql:=sql+'JOIN listino ON _prodotti.codicearticolo=listino.codicearticolo ';
+    sql:=sql+'JOIN settore ON listino.codicesettore=settore.codicesettore ';
+    sql:=sql+'LEFT JOIN giacenzaprodotti ';
+		sql:=sql+'ON listino.codicearticolo=giacenzaprodotti.codicearticolo ';
+		sql:=sql+'LEFT JOIN giacenzaprodotti_new ON listino.codicearticolo=giacenzaprodotti_new.codicearticolo AND listino.CodiceSettore=giacenzaprodotti_new.CodiceSettore ';
+    sql:=sql+'WHERE ';
+    sql:=sql+'_prodotti.FlagAnnullato<>"1" ';
+    sql:=sql+'AND listino.FlagAnnullato<>"1" ';
+    sqlList.add(sql);
+
+    // prodotti in clipro che non ci sono in prodotti
+    sql:='SELECT ';
+    sql:=sql+'cli_pro.CodiceArticolo, ';
+    sql:=sql+'DescrizioneProdotto, ';
+    sql:=sql+'0 AS Prezzo1, ';
+    sql:=sql+'PxC1, ';
+    sql:=sql+'0 AS Sconto1_1, ';
+    sql:=sql+'0 AS Sconto2_1, ';
+    sql:=sql+'0 AS Sconto3_1, ';
+    sql:=sql+'FlagNetto, ';
+    sql:=sql+'FlagAbilitazione, ';
+    sql:=sql+'giacenzaprodotti.giacenza AS DescrizioneAggiuntiva, ';
+    sql:=sql+'Linea, ';
+    sql:=sql+'lingua, ';
+    sql:=sql+'cli_pro.codiceCliente AS filtroClienti, ';
+    sql:=sql+'CodiceEAN, ';
+    sql:=sql+'DescrizioneProdotto AS DescrizioneProdottoLunga,';
+    sql:=sql+'"" as LastCodeEan, ';
+    sql:=sql+'0 AS PezziInner, ';
+    sql:=sql+'0 AS PezziMaster, ';
+    sql:=sql+'giacenzaprodotti_new.Giacenza AS DescrizioneAggiuntivaNew, ';
+    sql:=sql+'0 AS prodotti_exported_ ';
+    sql:=sql+'FROM cli_pro ';
+    sql:=sql+'LEFT JOIN giacenzaprodotti ';
+    sql:=sql+'ON cli_pro.codicearticolo=giacenzaprodotti.codicearticolo ';
+    sql:=sql+'LEFT JOIN giacenzaprodotti_new ON cli_pro.codicearticolo=giacenzaprodotti_new.codicearticolo AND cli_pro.Linea=giacenzaprodotti_new.CodiceSettore ';
+    sql:=sql+'WHERE (cli_pro.CodiceArticolo,cli_pro.Linea,cli_pro.lingua) NOT IN (SELECT codicearticolo,linea,lingua FROM prodotti WHERE filtroclienti="") ';
+    sqlList.add(sql);
+    result:=result and SqlToTable(importExportOptions.db,sqlList,'prodotti');
+  end;
+
+
+
+
+
+//2019.01.15+ Attributi prodotti per ricerca avanzata 
+  if prodottiModified or listinoModified then
+  begin
+    sqlList.clear();
+
+    sql:='SELECT DISTINCT ';
+    sql:=sql+'_prodotti.codicearticolo, ';
+    sql:=sql+'listino.codicesettore AS linea, ';
+    sql:=sql+'CONCAT(_prodotti.Macrocategoria,COALESCE(CONCAT(" - ",macrocategoria.Descrizione),"")) AS Filtro1, ';
+    sql:=sql+'CONCAT(_prodotti.Categoria,COALESCE(CONCAT(" - ",categorieprodotto.Descrizione),"")) AS Filtro2, ';
+    sql:=sql+'ClGerarc_2 AS Filtro3, ';
+    sql:=sql+'ClGerarc_3 AS Filtro4, ';
+    sql:=sql+'0 AS attributi_prodotti_exported_ ';
+    sql:=sql+'FROM _prodotti ';
+    sql:=sql+'JOIN listino ON _prodotti.codicearticolo=listino.codicearticolo ';
+    sql:=sql+'LEFT JOIN categorieprodotto ON _prodotti.Macrocategoria = categorieprodotto.Macrocategoria AND _prodotti.Categoria = categorieprodotto.Categoria ';
+    sql:=sql+'LEFT JOIN macrocategoria ON _prodotti.Macrocategoria = macrocategoria.Macrocategoria  ';
+    sql:=sql+'WHERE ';
+    sql:=sql+'_prodotti.FlagAnnullato<>"1" ';
+    sql:=sql+'AND listino.FlagAnnullato<>"1" ';
+    sqlList.add(sql);
+
+    result:=result and SqlToTable(importExportOptions.db,sqlList,'attributi_prodotti');
+  end;
+//2019.01.15 Fine 
+
+  if settoreModified or agentiSettoreModified or clientiSettoreAgenteModified then
+  begin
+    sqlList.clear();
+
+    sql:='SELECT DISTINCT ';
+    sql:=sql+'clientisettoreagente.codicesettore,DescrizioneSettore,codiceCliente,codiceagente,0 AS predocL1_EXPORTED_ ';
+    sql:=sql+'FROM clientisettoreagente JOIN settore ON clientisettoreagente.codicesettore=settore.codicesettore ';
+    sqlList.add(sql);
+
+    sql:='SELECT DISTINCT ';
+    sql:=sql+'agentisettore.codicesettore,DescrizioneSettore,"-" AS codiceCliente,codiceagente,0 AS predocL1_EXPORTED_ ';
+    sql:=sql+'FROM agentisettore JOIN settore ON agentisettore.codicesettore=settore.codicesettore ';
+    sqlList.add(sql);
+
+    result:=result and SqlToTable(importExportOptions.db,sqlList,'predocL1');
+  end;
+
+  if b2b_clientiLineeModified or b2b_settore then
+  begin
+    sqlList.clear();
+
+    sql:='SELECT DISTINCT ';
+    sql:=sql+'b2b_clientilinee.linea as CodiceLivello1,DescrizioneSettore,CodiceCliente,CodiceSpedizione,0 AS b2b_predocL1_EXPORTED_ ';
+    sql:=sql+'FROM b2b_clientilinee JOIN b2b_settore ON b2b_settore.codicesettore= b2b_clientilinee.linea ';
+    sqlList.add(sql);
+
+    result:=result and SqlToTable(importExportOptions.db,sqlList,'b2b_predocl1');
+  end;
+  if tmp_lastorderModified then
+    begin
+      sqlList.clear();
+
+      sql:='SELECT DISTINCT';
+      sql:=sql+'CodiceCliente,CodiceArticolo,Linea,dataFatturaONotaAccredito,QuantitaOrd_1,Prezzo_1 ';
+      sql:=sql+'FROM portafogliofatture';
+      sql:=sql+'WHERE dataFatturaONotaAccredito = (SELECT MAX(dataFatturaONotaAccredito) FROM portafogliofatture)';
+      sql:=sql+'GROUP BY CodiceArticolo,CodiceCliente, Linea';
+      sqlList.add(sql);
+
+
+  if prodottiModified or b2b_listinoModified or b2b_modelliModified or b2b_cliProModified  then
+  begin
+    sqlList.clear();
+
+    sql:='SELECT _prodotti.codicearticolo, _prodotti.descrizioneProdotto, prezzo AS Prezzo1, pezziImballo1 AS PCX1, ';
+    sql:=sql+'b2b_listino.Sconto1 AS Sconto1_1,b2b_listino.Sconto2 AS Sconto2_1,b2b_listino.Sconto3 AS Sconto3_1, ';
+    sql:=sql+'0 AS FlagNetto,8 AS FlagAbilitazione,giacenza AS DescrizioneAggiuntiva,b2b_listino.codicesettore AS linea,lingua, ';
+    sql:=sql+'"" AS filtroClienti,_prodotti.CodiceEAN AS CodiceEAN, Imballo1,IF (_prodotti_exported_=0 OR b2b_listino_exported_=0 OR b2b_settore_exported_=0,0,1) AS b2b_prodotti_exported_ ';
+    sql:=sql+'FROM _prodotti ';
+    sql:=sql+'JOIN b2b_listino ON b2b_listino.codicearticolo=_prodotti.codicearticolo ';
+    sql:=sql+'JOIN b2b_settore ON b2b_settore.codicesettore=b2b_listino.codicesettore ';
+    sql:=sql+'LEFT JOIN giacenzaprodotti ON b2b_listino.codicearticolo=giacenzaprodotti.codicearticolo ';
+    sql:=sql+'WHERE _prodotti.FlagAnnullato<>"1"';
+    sqlList.add(sql);
+
+     // prodotti in b2b_clipro che non ci sono in b2b_prodotti
+    sql:='SELECT b2b_cli_pro.CodiceArticolo, ';
+    sql:=sql+'DescrizioneProdotto, ';
+    sql:=sql+'0 AS Prezzo1,PxC1, ';
+    sql:=sql+'0 AS Sconto1_1, ';
+    sql:=sql+'0 AS Sconto2_1, ';
+    sql:=sql+'0 AS Sconto3_1, ';
+    sql:=sql+'FlagNetto, ';
+    sql:=sql+'FlagAbilitazione, ';
+    sql:=sql+'coalesce(giacenza,"") AS DescrizioneAggiuntiva, ';
+    sql:=sql+'Linea, ';
+    sql:=sql+'lingua, ';
+    sql:=sql+'b2b_cli_pro.codiceCliente AS filtroClienti, ';
+    sql:=sql+'CodiceEAN, ';
+    sql:=sql+'null as Imballo1, ';
+    sql:=sql+'0 AS b2b_prodotti_exported_ ';
+    sql:=sql+'FROM b2b_cli_pro ';
+    sql:=sql+'LEFT JOIN giacenzaprodotti ';
+    sql:=sql+'ON b2b_cli_pro.codicearticolo=giacenzaprodotti.codicearticolo ';
+    sql:=sql+'WHERE (b2b_cli_pro.CodiceArticolo,b2b_cli_pro.Linea,b2b_cli_pro.lingua) NOT IN (SELECT codicearticolo,linea,lingua FROM b2b_prodotti WHERE filtroclienti="")';
+    sqlList.add(sql);
+
+    result:=result and SqlToTable(importExportOptions.db,sqlList,'b2b_prodotti');
+  end;
+
+  //COMUNICAZIONI SEDE
+  result:=result and DuplicateTable(importExportOptions, WEB_DATABASE_NAME + '.comunicazionisede', 'comunicazionisede', true);
+  result:=result and DuplicateTable(importExportOptions, WEB_DATABASE_NAME + '.comunicazionisede_filtri', 'comunicazionisede_filtri', true);
+  result:=result and DuplicateTable(importExportOptions, WEB_DATABASE_NAME + '.comunicazionisede_agenti_info', 'comunicazionisede_agenti_info', true);
+
+  //SCHEDE CLIENTE
+  result:=result and DuplicateTable(importExportOptions, WEB_DATABASE_NAME + '.schedacli_domande', 'schedacli_domande', true);
+  result:=result and DuplicateTable(importExportOptions, WEB_DATABASE_NAME + '.schedacli_master', 'schedacli_master', true);
+  result:=result and DuplicateTable(importExportOptions, WEB_DATABASE_NAME + '.schedacli_valori', 'schedacli_valori', true);
+
+  if settoreModified then
+    SetUnmodified(db,'SETTORE',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if agentiSettoreModified then
+    SetUnmodified(db,'AGENTISETTORE',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if prodottiModified then
+    SetUnmodified(db,'_PRODOTTI',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if listinoModified then
+    SetUnmodified(db,'LISTINO',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if clientiSettoreAgenteModified then
+    SetUnmodified(db,'CLIENTISETTOREAGENTE',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if sceltaProdottiModified then
+    SetUnmodified(db,'SCELTAPRODOTTI',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if cliProModified then
+    SetUnmodified(db,'CLI_PRO',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if b2b_clientiLineeModified then
+    SetUnmodified(db,'B2B_CLIENTILINEE',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if b2b_settore then
+    SetUnmodified(db,'B2B_SETTORE',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if b2b_cliProModified then
+    SetUnmodified(db,'B2B_CLI_PRO',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if b2b_listinoModified then
+    SetUnmodified(db,'B2B_LISTINO',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+  if b2b_modelliModified then
+    SetUnmodified(db,'B2B_MODELLI',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+   if tmp_lastorderModified then
+    SetUnmodified(db,'TMP_LASTORDER',gEXPORTEDFLAG_EXPORTED_GESTTOMOBILE);
+
+  sqlList.free;
+end;
+
+function Import_UpdateRecords(importExportOptions:TImportExportOptions):boolean;
+begin
+  result:=true;
+
+  OutputAddWithTime('aggiornamento dati...',rvsNormal,owUnion);
+  SetStatusBarText('Aggiornamento dati in corso...');
+  AddToLog('aggiornamento dati...');
+
+  UpdateTables(importExportOptions);
+
+  if result then
+  begin
+    OutputAddNoNewLine('OK.',rvsNormal,owNoIcon);
+    SetStatusBarText('Aggiornamento dati in corso...OK');
+    AddToLog('aggiornamento dati avvenuto con successo.');
+  end
+  else
+  begin
+    OutputAddNoNewLine('NON OK.',rvsError,owNoIcon);
+    SetStatusBarText('Aggiornamento dati in corso...NON OK');
+    AddToLog('aggiornamento dati avvenuto con errori.');
+  end;
+  OutputAddEmptyLine();
+end;
+
+procedure Import_CreateViews(importExportOptions:TImportExportOptions);
+begin
+end;
+
+procedure Import_init(importExportOptions:TImportExportOptions);
+begin
+  with importExportOptions do
+  begin
+    db.OnBeforeStartImportFile  :=  @BeforeStartImportFile;
+    db.OnBeforeImportField      :=  @BeforeImportField;
+    db.OnAfterImportFile        :=  @OnAfterImportFile;
+
+    db.ExternalLockFile         :=  importExportOptions.externalLockFileName;
+    db.LockFile                 :=  importExportOptions.autoFilterLockFileName;
+    db.NotExportedVal           :=  gEXPORTEDFLAG_GESTTOMOBILE;
+  end;
+end;
+
+procedure Import_deinit(importExportOptions:TImportExportOptions;success:boolean);
+begin
+  Import_CreateViews(importExportOptions);
+  Import_UpdateRecords(importExportOptions);
+end;
+
+function Import_getFirstStep(importExportOptions:TImportExportOptions;var importProps:TImportProps):boolean;
+var
+  str:string;
+begin
+
+  importProps.sourceDir                 :=  importExportOptions.importDirs.base;
+  importProps.backupDir                 :=  importExportOptions.importDirs.backup;
+  importProps.errorsDir									:=  importExportOptions.importDirs.errors;
+  importProps.filter                    := '*.*';
+
+  str:=Format('inizio importazione dati dalla cartella "%s"...', [importProps.sourceDir])
+  OutputAddWithTime(str,rvsSubHeading,owInfo);
+  AddToLog(str);
+
+  importExportOptions.db.ExportIfNoRecords:=false;
+  result:=true;
+end;
+
+function Import_getNextStep(importExportOptions:TImportExportOptions;var importProps:TImportProps):boolean;
+begin
+  result:=false;
+end;
+
+procedure Import_onStepEnd(importExportOptions:TImportExportOptions;var importProps:TImportProps;importedCount:integer;success:boolean);
+var
+  sourceDir:string;
+begin
+  sourceDir:=importProps.sourceDir;
+
+  if success then
+  begin
+    if importedCount>0 then
+    begin
+      OutputAddWithTime(Format('importazione dati dalla cartella "%s" conclusa con successo.', [sourceDir]),rvsSubHeading,owOk);
+      SetStatusBarText(Format('Importazione dati dalla cartella "%s" conclusa con successo.', [sourceDir]));
+      AddToLog(Format('importazione dati dalla cartella "%s" conclusa con successo.',[sourceDir]));
+    end
+    else
+    begin
+      OutputAddWithTime(Format('importazione dati dalla cartella "%s" conclusa con successo (nessun dato da importare).', [sourceDir]),rvsSubHeading,owOk);
+      SetStatusBarText(Format('Importazione dati dalla cartella "%s" conclusa con successo (nessun dato da importare).', [sourceDir]));
+      AddToLog(Format('importazione dati dalla cartella "%s" conclusa con successo (nessun dato da importare).',[sourceDir]));
+    end;
+  end
+  else
+  begin
+    OutputAddWithTime(Format('importazione dati dalla cartella "%s" conclusa con errori.', [sourceDir]),rvsError,owStop);
+    SetStatusBarText(Format('Importazione dati dalla cartella "%s" conclusa con errori.', [sourceDir]));
+    AddToLog(Format('importazione dati dalla cartella "%s" conclusa con errori',[sourceDir]));
+  end;
+  OutputAddEmptyLine();
+end;
