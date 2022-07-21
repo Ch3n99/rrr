@@ -1,0 +1,2115 @@
+{ Script export dati per gestionale}
+
+{$I ..\..\Common\Common.lib}
+{$I ..\..\common\html.lib}
+{$I ..\..\common\pdflib.lib}
+
+const
+  gEXPVERSION                 = '0.1';
+  FORCE_NO_MAIL               = false;    //se true nessuna mail sarà inviata
+  cSEPARATORE                 = ';';
+
+type
+  TDocInfo = record
+    dateDoc: string;
+    docNumber: integer;
+    prov: string;
+    agentCode: string;
+    codiceCliente: string;
+    codiceDestinazione: string;
+    linea: string;
+    infotype: string;
+    realAgentCode: string;
+    gestionaleDocNum: integer;
+  end;
+
+procedure BeforeExportField(Sender: TObject; fileName, defFileName, internalName, fieldName: string; rowNumber, defFieldNumber, defFieldLen: integer; var fieldVal: string; var canContinue: boolean);
+begin
+  internalName:=Uppercase(internalName);
+  fieldName:=Uppercase(trim(fieldName));
+end;
+
+//Ritorno il giusto CodiceAgente nel caso di agenti fiera
+function GetCodiceAgente(db:TDatabase;codiceAgente,numeroDoc,dataDoc,provenienza:string):string;
+var
+  sql:string;
+  qry:TZQuery;
+begin
+  sql:='';
+  result:=codiceAgente;
+  qry:=TZQuery.create(nil);
+  qry.Connection:=TZConnection(db);
+  //qry.sql.text:='select * from agenti_fiera where AgenteFiera="'+codiceAgente+'" ';
+  qry.sql.text:='SELECT agenti_fiera.*, agenti_fiera_default_export.DefaultAgenteExport AS CodiceAgenteDefinitivoDefault FROM agenti_fiera LEFT JOIN agenti_fiera_default_export ON agenti_fiera.OrganizzazioneCommerciale = agenti_fiera_default_export.OrganizzazioneCommerciale WHERE AgenteFiera="'+codiceAgente+'" ';
+  qry.open;
+  if not qry.eof then
+  begin
+    result:=trim(qry.FieldByName('CodiceAgenteDefinitivoDefault').asString);;
+    qry.sql.clear;
+    sql:=sql+'SELECT *, lineeage.CodiceAgente AS CodiceAgenteDefinitivo FROM ( ';
+    sql:=sql+'SELECT * FROM docMaster WHERE CodiceAgente="'+codiceAgente+'" AND NumeroDoc="'+numeroDoc+'" AND DataDoc="'+dataDoc+'" AND Provenienza="'+provenienza+'" limit 1 ';
+    sql:=sql+') as dm ';
+    sql:=sql+'JOIN agenti_clienti ON (CONCAT(agenti_clienti.CodiceCliente,agenti_clienti.CodiceSpedizione)=dm.CodiceCliente AND agenti_clienti.CodiceDoor=dm.CodiceDestinazione) ';
+    sql:=sql+'LEFT JOIN lineeage ON (lineeage.CodiceAgente=agenti_clienti.CodiceAgente AND lineeage.OrganizzazioneCommerciale=agenti_clienti.OrganizzazioneCommerciale AND lineeage.zona = agenti_clienti.ZonaClienteDoor) ';
+    sql:=sql+'WHERE lineeage.CodiceLinea=dm.Linea GROUP BY agenti_clienti.CodiceAgente ';
+    qry.sql.text:=sql;
+    qry.open;
+    if not qry.eof then
+    begin
+      result:=trim(qry.FieldByName('CodiceAgenteDefinitivo').asString);
+    end;
+  end;
+  qry.close;
+  qry.free;
+end;
+
+//GET DescPredoc: dato un codice predoc, ritorna la descrizione
+function GetDescPredoc(db:TDatabase;codPredoc:string):string;
+var
+  qry:TZQuery;
+begin
+   result:=codPredoc;
+   qry:=TZQuery.create(nil);
+   qry.Connection:=TZConnection(db);
+   qry.sql.text:='SELECT Descrizione FROM anagrlin WHERE LineeVendita="'+codPredoc+'" ';
+   qry.open;
+   if not qry.eof then result:= trim(qry.FieldByName('Descrizione').asString);
+   qry.close;
+   qry.free;
+end;
+
+//GET ResoInvCodiceCliente: dato il codice agente, ritorna il suo codice cliente relativo all'inventario
+function GetResoInvCodiceCliente(db:TDatabase;codAge:string):string;
+var
+  qry:TZQuery;
+begin
+   result:='';
+   qry:=TZQuery.create(nil);
+   qry.Connection:=TZConnection(db);
+   qry.sql.text:='SELECT CodiceCliente FROM resocampionariorep WHERE codiceAgente="'+codAge+'" LIMIT 1 ';
+   qry.open;
+   if not qry.eof then result:= trim(qry.FieldByName('CodiceCliente').asString);
+   qry.close;
+   qry.free;
+end;
+
+function EscapeCsvField(field:string):string;
+begin
+  result:=Trim(field);
+  result:=StringReplace(result,#10,'',false);
+  result:=StringReplace(result,#13,'',false);
+  result:=StringReplace(result,cSEPARATORE,'',false);  //elimino eventuale carattere separatore
+  result:=result+cSEPARATORE;
+end;
+
+function EscapeCsvFieldRec(rec:TZQuery; field:string):string;
+begin
+  result:=rec.FieldByName(field).asString;
+  result:=EscapeCsvField(result);
+end;
+
+
+procedure SetExported_(db:TDataBase;tblName,auxCond:string);
+begin
+  SetExportedFlagEx(db,tblName,auxCond,gEXPORTEDFLAG_BATOGEST,gEXPORTEDFLAG_EXPORTED_BATOGEST);
+  //SetExportedFlagEx(db,tblName,auxCond,gEXPORTEDFLAG_BATOGEST,gEXPORTEDFLAG_EXPORTED_BATOGEST);
+end;
+
+procedure SetDocsExported(db:TDataBase;auxCond:string);
+begin
+
+  SetExported_(db,'docMaster',auxCond);
+  SetExported_(db,'docDetails',auxCond);
+  SetExported_(db,'docNotes',auxCond);
+end;
+
+procedure SetClientsExported(db:TDataBase;auxCond:string);
+begin
+  SetExported_(db,'docAnagCli',auxCond);
+end;
+
+function CreateDocsFilterSql(tblName,marker,codiceAgente,docNum,dataDoc:string):string;
+begin
+  result:=Format('select *,''%s'' as Marker from %s where codiceAgente=''%s'' and NumeroDoc=''%s'' and DataDoc=''%s''',
+    [marker,tblName,codiceAgente,docNum,dataDoc]);
+end;
+
+function CreateClientsFilterSql(codiceAgente,codCli,CodDest:string;fullExport:boolean):string;
+begin
+
+  result:=Format('select *,''+'' as Marker from client where codiceAgente=''%s'' and codiceCliente=''%s'' and CodiceSpedizione=''%s''',
+    [codiceAgente,codCli,CodDest]);
+
+  if not fullExport then
+    result:=Format('%s and (client_exported_=%d or client_exported_=%d)',[result,gEXPORTEDFLAG_BATOGEST,gEXPORTEDFLAG_TOALL]);
+
+end;
+
+function DoSendFile(fileName:string;title:string;mail_to,mail_to_ccn:string):boolean;
+begin
+  MailNew(false,true,true);
+  MailSetHost(docsEmail.host);
+  MailSetFromName(docsEmail.fromName);
+  MailSetFromAddress(docsEmail.fromAddress);
+  //MailSetTo(docsEmail.defaultTo);
+  MailSetTo(mail_to);
+  MailSetCC(docsEmail.defaultCC);
+  MailSetCCN(mail_to_ccn);
+
+  MailSetSubject(title);
+  MailSetUserName(docsEmail.user);
+  MailSetPassword(docsEmail.pwd);
+  MailSetBodyFromFile(fileName);
+  MailSetBackupDir(gToPC_export_errorEmailsErrorDir);
+  MailSetErrorsDir(gToPC_export_errorEmailsOKDir);
+
+  result:=MailSend();
+  MailEnd();
+end;
+
+//Aggiunge alla tabella docsend la mail da inviare
+//Se il record esiste già non fa nulla
+function AppendToDocSend(db:TDatabase;tipoDoc,codiceAgente,destinatario,docNum,dataDoc,provenienza,subject:string;show_note_private:bool;destinatario_ccn:string):boolean;
+var sql:string;
+begin
+  result:=false;
+  sql:='INSERT INTO docsend (DocType,CodiceAgente,NumeroDoc,DataDoc,Provenienza,Destinatario,Destinatario_cc,SUBJECT,MostraNotePrivate, SendTimeStamp, TentativiFatti) ';
+	sql:=sql+'VALUES( ';
+  sql:=sql+'"'+tipoDoc+'", ';
+  sql:=sql+'"'+codiceAgente+'", ';
+  sql:=sql+'"'+docNum+'", ';
+  sql:=sql+'"'+DataDoc+'", ';
+  sql:=sql+'"'+provenienza+'", ';
+  sql:=sql+'"'+Destinatario+'", ';
+  sql:=sql+'"'+destinatario_ccn+'", ';
+  sql:=sql+'"'+subject+'", ';
+  sql:=sql+'"'+mid(booltostr(show_note_private, true),0,1)+'", ';
+  sql:=sql+'"", ';
+  sql:=sql+'"0" ';
+  sql:=sql+') ';
+  result:=db.executeSql(sql);
+end;
+
+//Imposta l'esito (ok/non) dell'invio delle mail
+procedure SetDocSendStatus(db:TDatabase;tipoDoc,codiceAgente,destinatario,docNum,dataDoc,provenienza:string;esito_invio:boolean);
+var sql:string;
+begin
+  if(esito_invio) then begin
+    //Esito OK, aggiorno TS
+    sql:='update docsend set SendTimeStamp = "'+GetTimeStamp()+'" ';
+  end else begin
+    //Esito NON OK, aggiorno TTL
+    sql:='update docsend set TentativiFatti = TentativiFatti+1 ';
+  end;
+  sql:=sql+'WHERE DocType = "'+tipodoc+'" AND CodiceAgente = "'+codiceAgente+'" AND NumeroDoc = "'+docNUm+'" AND DataDoc = "'+dataDoc+'" AND Provenienza = "'+provenienza+'" AND Destinatario = "'+destinatario+'" ';
+  db.executeSql(sql);
+end;
+
+//Invia mail con la copia commissione
+function SendOrderConfermationMail(db:TDatabase;codiceAgente,destinatario,docNum,dataDoc,provenienza,subject:string;show_note_private:bool;destinatario_ccn:string;only_append_mail:boolean):boolean;
+var
+  mailAddr,baseDir,htmlName,docNumStr,dataDocIt,title,mailSubject,backupEmailDir,docNumSedeStr,sql:string;
+  retVal:boolean;
+  qry:TZQuery;
+begin
+  mailAddr:=destinatario;
+
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+
+  sql:=Format('SELECT COALESCE(NumeroDocSede,numeroDoc) as NumeroDocumento FROM docmaster WHERE codiceAgente = "%s" AND numeroDoc = "%s" AND dataDoc = "%s" AND provenienza = "%s" limit 1 ', [codiceAgente,docNum,dataDoc,provenienza]);
+  qry.sql.text:=sql;
+  qry.open;
+  docNumSedeStr:=qry.FieldByName('NumeroDocumento').asString;
+  qry.close;
+
+  //Aggiungo alla coda di mail da inviare  (O=Ordine)
+  AppendToDocSend(db,'O',codiceAgente,destinatario,docNum,dataDoc,provenienza,subject,show_note_private,destinatario_ccn);
+
+  //se devo solo aggiungere la mail alla coda, esco suito
+  if(only_append_mail) then begin
+    result:=true;
+    exit;
+  end;
+
+  if(DebugMode()) or (FORCE_NO_MAIL=true) then begin
+    result:=true;
+    SetDocSendStatus(db,'O',codiceAgente,destinatario,docNum,dataDoc,provenienza,true);
+    exit;
+  end;
+
+  backupEmailDir:=GetApplicationPath()+'Backup\Html\';
+  baseDir:=backupEmailDir+codiceAgente+'\Docs\';
+  ForceDirectories(baseDir);
+
+  docNumStr:=inttostr(strtoint(docNum));
+  dataDocIt:=copy(dataDoc,1,4)+'.'+copy(dataDoc,5,2)+'.'+copy(dataDoc,7,2);
+  htmlName:=Format('%s%s - Documento ordine n.%s.html',[baseDir,dataDocIt,docNumStr]);
+  title:= Format('Selezione n.%s del %s',[docNumSedeStr,dataDocIt]);
+  if(subject='')then mailSubject:=title;
+  if(subject<>'') then  mailSubject:=subject;
+
+  AddToOutput('     ',true,0,-1);
+  AddToOutput(Format('%s: invio email di conferma ordine "%s" agente "%s" ad indirizzo %s in corso...', [timetostr(time),title,codiceAgente,mailAddr]),false,2,33);
+  AddToLog(Format('inizio invio email di conferma ordine "%s" agente "%s" ad indirizzo %s...', [title,codiceAgente,mailAddr]));
+  retVal:=CreateDocHtml(TDatabase(db),codiceAgente,docNum,dataDoc,provenienza,htmlName, false, show_note_private);
+  if retVal then
+  begin
+    retVal:=DoSendFile(htmlName,mailSubject,mailAddr,destinatario_ccn);
+    //retVal:=DoSendFile(codiceAgente,htmlName,mailSubject,'Agente'+codiceAgente,title);
+  end;
+  if retVal then
+  begin
+    AddToOutput('OK.',false,2,-1)
+    AddToLog('invio email OK ');
+    SetDocSendStatus(db,'O',codiceAgente,destinatario,docNum,dataDoc,provenienza,true);
+  end
+  else
+  begin
+    AddToOutput('NON OK.',false,4,-1);
+    AddToLog('invio email NON OK');
+    SetDocSendStatus(db,'O',codiceAgente,destinatario,docNum,dataDoc,provenienza,false);
+  end;
+  result:=retVal;
+end;
+
+//Invia mail con il reso
+function SendResoConfermationMail(db:TDatabase;codiceAgente,destinatario,docNum,dataDoc,provenienza,subject:string;show_note_private:bool;destinatario_ccn:string; only_append_mail:boolean):boolean;
+var
+  mailAddr,baseDir,htmlName,docNumStr,dataDocIt,title,mailSubject,backupEmailDir,sql,numeroDocReso:string;
+  retVal,resiPresenti,isInventario,reso_giacenza:boolean;
+  qry,tDocResi,tTmp:TZQuery;
+begin
+  mailAddr:=destinatario;
+
+  //Aggiungo alla coda di mail da inviare (R=REso)
+  AppendToDocSend(db,'R',codiceAgente,destinatario,docNum,dataDoc,provenienza,subject,show_note_private,destinatario_ccn);
+
+  //se devo solo aggiungere la mail alla coda, esco suito
+  if(only_append_mail) then begin
+    result:=true;
+    exit;
+  end;
+
+  if(DebugMode()) or (FORCE_NO_MAIL=true) then begin
+    result:=true;
+    SetDocSendStatus(db,'R',codiceAgente,destinatario,docNum,dataDoc,provenienza,true);
+    exit;
+  end;
+
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+
+  //Verifico se il reso ha lameno un articolo (generio o SKU) oppure se e' un reso inventario
+  resiPresenti:=false;
+  isInventario:=false;
+  sql:='SELECT ';
+  sql:=sql+' (SELECT SUM(PezziResi) FROM docresi WHERE numeroDoc='+docNum+' AND datadoc="'+datadoc+'" AND codiceAgente="'+codiceAgente+'" AND provenienza="'+provenienza+'") AS PzGen, ';
+  sql:=sql+' (SELECT SUM(QuantitaOrd_3) FROM docdetails WHERE numeroDoc='+docNum+' AND datadoc="'+datadoc+'" AND codiceAgente="'+codiceAgente+'" AND provenienza="'+provenienza+'") AS PzSku, ';
+  sql:=sql+' (SELECT if(Linea="INV" and customParam4="#",1,0) from docmaster WHERE numeroDoc='+docNum+' AND datadoc="'+datadoc+'" AND codiceAgente="'+codiceAgente+'" AND provenienza="'+provenienza+'") AS flagResoInv ';
+  qry.sql.text:=sql;
+  qry.open;
+  if not qry.Eof then begin
+    if (qry.FieldByName('PzGen').asinteger > 0) then resiPresenti:=true;
+    if (qry.FieldByName('PzSku').asinteger > 0) then resiPresenti:=true;
+    if (qry.FieldByName('flagResoInv').asinteger > 0) then resiPresenti:=true;
+    if (qry.FieldByName('flagResoInv').asinteger > 0) then isInventario:=true;
+  end;
+  qry.close;
+  if(resiPresenti=false) then begin
+    result:=true;
+    SetDocSendStatus(db,'R',codiceAgente,destinatario,docNum,dataDoc,provenienza,true);
+    exit;
+  end;
+
+  backupEmailDir:=GetApplicationPath()+'Backup\Html\';
+  baseDir:=backupEmailDir+codiceAgente+'\Docs\';
+  ForceDirectories(baseDir);
+
+  tDocResi:=TZQuery.create(nil);
+  tTmp:=TZQuery.create(nil);
+
+  tDocResi.Connection:=TZConnection(db);
+  tTmp.Connection:=TZConnection(db);
+
+  //controllo se il reso è di tipo giacenza o no
+  reso_giacenza:=false;
+  tTmp.sql.text:='SELECT numeroDocSede FROM docmaster WHERE Linea="INV" AND codiceAgente="'+codiceAgente+'" AND dataDoc="'+dataDoc+'" AND numeroDoc="'+docnum+'" AND provenienza="'+provenienza+'" ';
+  tTmp.open;
+  if not tTmp.eof then reso_giacenza:=true;
+  tTmp.close;
+
+  if(reso_giacenza=false)then begin
+    //Estraggo righe da docResi (serve anche per evere il numero di aut. reso)
+    tDocResi.sql.add('SELECT * FROM docREsi WHERE codiceAgente="'+codiceAgente+'" AND dataDoc="'+dataDoc+'" AND numeroDoc="'+docnum+'" AND provenienza="'+provenienza+'" limit 1');
+    tDocResi.open;
+      numeroDocReso:=tDocResi.FieldByName('codiceReso').asString;
+  end else begin
+    //E'un reso di giacenza agente, ricavo il numeroReso dal campo numeroDocSede
+    tDocResi.sql.add('SELECT numeroDocSede FROM docmaster WHERE codiceAgente="'+codiceAgente+'" AND dataDoc="'+dataDoc+'" AND numeroDoc="'+docnum+'" AND provenienza="'+provenienza+'" ');
+    tDocResi.open;
+    numeroDocReso:=tDocResi.FieldByName('numeroDocSede').asString;
+    tTmp.close;
+  end;
+
+  docNumStr:=inttostr(strtoint(docNum));
+  dataDocIt:=copy(dataDoc,1,4)+'.'+copy(dataDoc,5,2)+'.'+copy(dataDoc,7,2);
+  htmlName:=Format('%s%s - Documento reso n.%s.html',[baseDir,dataDocIt,docNumStr]);
+  title:= Format('Documento di reso dell''ordine  n.%s del %s',[numeroDocReso,dataDocIt]);
+  if(subject='')then mailSubject:=title;
+  if(subject<>'') then  mailSubject:=subject;
+
+  AddToOutput('     ',true,0,-1);
+  AddToOutput(Format('%s: invio email di conferma reso "%s" agente "%s" ad indirizzo %s in corso...', [timetostr(time),title,codiceAgente,mailAddr]),false,2,33);
+  AddToLog(Format('inizio invio email di conferma reso "%s" agente "%s" ad indirizzo %s...', [title,codiceAgente,mailAddr]));
+  retVal:=CreateDocHtmlResi(TDatabase(db),codiceAgente,docNum,dataDoc,provenienza,htmlName, false, show_note_private);
+  if retVal then
+  begin
+    retVal:=DoSendFile(htmlName,mailSubject,mailAddr,destinatario_ccn);
+    //retVal:=DoSendFile(codiceAgente,htmlName,mailSubject,'Agente'+codiceAgente,title);
+  end;
+  if retVal then
+  begin
+    AddToOutput('OK.',false,2,-1)
+    AddToLog(Format('invio email OK', [title,codiceAgente]));
+    SetDocSendStatus(db,'R',codiceAgente,destinatario,docNum,dataDoc,provenienza,true);
+  end
+  else
+  begin
+    AddToOutput('NON OK.',false,4,-1);
+    AddToLog('invio email NON OK');
+    SetDocSendStatus(db,'R',codiceAgente,destinatario,docNum,dataDoc,provenienza,false);
+  end;
+  result:=retVal;
+end;
+
+//Invia una mail per il nuovo cliente
+function SendNotificationMail(db:TDatabase;codiceAgente,docNum,dataDoc,provenienza:string; only_append_mail:boolean):boolean;
+var
+  mailAddr,baseDir,htmlName,docNumStr,dataDocIt,title,mailSubject,backupEmailDir,numeroDocSede,subject:string;
+  retVal:boolean;
+  qry:TZQuery;
+begin
+  //2017.11.09 Federico+: modifica subject per le mail nuvo cliente
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+  //qry.sql.add('SELECT NumeroDocSede FROM docmaster WHERE codiceAgente="'+codiceAgente+'" AND dataDoc="'+dataDoc+'" AND numeroDoc="'+docNum+'" AND provenienza="'+provenienza+'" ');
+  qry.sql.add('SELECT COALESCE(NumeroDocSede,NumeroDocumento) AS NumeroDocSede FROM docmaster JOIN transcodificaordinipad ON CodiceAgenteIpad=codiceAgente AND NumeroDocIpad=numeroDoc AND DataDocIpad=dataDoc AND ProvenienzaIpad=provenienza WHERE codiceAgente="'+codiceAgente+'" AND dataDoc="'+dataDoc+'" AND numeroDoc="'+docNum+'" AND provenienza="'+provenienza+'" ');
+  qry.open;
+  if(not qry.eof) then
+  begin
+    numeroDocSede:=Trim(qry.FieldByName('NumeroDocSede').asString);
+    subject:=Format('%s - Documento n.%s del %s ',[CodiceAgente,numeroDocSede,dataDoc]);
+  end
+  else
+    subject:='';
+  qry.sql.clear;
+  qry.close;
+  //2017.11.09 Fine
+
+  //Aggiungo alla coda di mail da inviare (N=New Client)
+  AppendToDocSend(db,'N',codiceAgente,'',docNum,dataDoc,provenienza,subject,false,'');
+
+  //se devo solo aggiungere la mail alla coda, esco suito
+  if(only_append_mail) then begin
+    result:=true;
+    exit;
+  end;
+
+  if(DebugMode()) or (FORCE_NO_MAIL=true) then begin
+    result:=true;
+    SetDocSendStatus(db,'N',codiceAgente,'',docNum,dataDoc,provenienza,true);
+    exit;
+  end;
+
+  //Estraggo indirizzo email
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+  qry.sql.add(Format('select mail,mail.organizzazionecommerciale from mail join anagrage on(anagrage.organizzazionecommerciale=mail.organizzazionecommerciale) where codiceagente=''%s'' ',[codiceAgente]));
+  qry.Open;
+  mailAddr:='';
+  if not qry.Eof then
+  begin
+    mailAddr:=qry.FieldByName('mail').asstring;
+  end
+  else
+  begin
+    qry.sql.clear;
+    qry.sql.add(Format('select * from mail join agenti_fiera on(agenti_fiera.organizzazionecommerciale=mail.organizzazionecommerciale) where agentefiera=''%s'' group by agenti_fiera.organizzazionecommerciale LIMIT 1',[codiceAgente]));
+    qry.Open;
+    if not qry.Eof then
+    begin
+      mailAddr:=qry.FieldByName('mail').asstring;
+    end
+  end;
+  qry.Free;
+  if(mailAddr='')then
+  begin
+    AddToOutput(Format('%s: mail non presente per organizzazionecommerciale dell''agente %s', [timetostr(time),codiceAgente]),false,2,33);
+    AddToLog(Format('mail non presente per organizzazionecommerciale dell''agente %s',[codiceAgente]));
+    SetDocSendStatus(db,'N',codiceAgente,'',docNum,dataDoc,provenienza,true);
+    exit;
+  end;
+
+
+  backupEmailDir:=GetApplicationPath()+'Backup\Html\';
+  baseDir:=backupEmailDir+codiceAgente+'\Docs\';
+  ForceDirectories(baseDir);
+
+  docNumStr:=inttostr(strtoint(docNum));
+  dataDocIt:=copy(dataDoc,1,4)+'.'+copy(dataDoc,5,2)+'.'+copy(dataDoc,7,2);
+  htmlName:=Format('%s%s - Documento n.%s.html',[baseDir,dataDocIt,docNumStr]);
+  title:= Format('Documento n.%s del %s',[docNumStr,dataDocIt]);
+  mailSubject:=title;
+  if (subject <> '') then mailSubject:=subject;
+
+
+  AddToOutput('     ',true,0,-1);
+  AddToOutput(Format('%s: invio email per nuovo cliente "%s" agente "%s" ad indirizzo %s in corso...', [timetostr(time),title,codiceAgente,mailAddr]),false,2,33);
+  AddToLog(Format('inizio invio email per nuovo cliente "%s" agente "%s" ad indirizzo %s...', [title,codiceAgente,mailAddr]));
+  retVal:=CreateDocHtml(TDatabase(db),codiceAgente,docNum,dataDoc,provenienza,htmlName,true, true);
+  if retVal then
+  begin
+    retVal:=DoSendFile(htmlName,mailSubject,mailAddr,'');
+    //retVal:=DoSendFile(codiceAgente,htmlName,mailSubject,'Agente'+codiceAgente,title);
+  end;
+  if retVal then
+  begin
+    AddToOutput('OK.',false,2,-1)
+    AddToLog(Format('invio email "%s" agente "%s" avvenuta con successo.', [title,codiceAgente]));
+    SetDocSendStatus(db,'N',codiceAgente,'',docNum,dataDoc,provenienza,true);
+  end
+  else
+  begin
+    AddToOutput('NON OK.',false,4,-1);
+    AddToLog(Format('invio email "%s" agente "%s" avvenuta con errori.', [title,codiceAgente]));
+    SetDocSendStatus(db,'N',codiceAgente,'',docNum,dataDoc,provenienza,false);
+  end;
+  result:=retVal;
+end;
+
+//Ritenta l'invio delle mail non inviate
+procedure SendMailPending(db:TDatabase);
+var
+sql:string;
+qry:TZQuery;
+tipoDoc,codiceAgente,docNum,dataDoc,provenienza,Destinatario,destinatario_ccn,subject:string;
+show_note_private:boolean;
+begin
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+
+  sql:='select * from docsend where SendTimeStamp="" and TentativiFatti<15 limit 200 ';
+  qry.sql.text:=sql;
+  qry.open;
+  while not qry.eof do begin
+    tipoDoc:=qry.FieldByName('docType').asString;
+    codiceAgente:=qry.FieldByName('codiceAgente').asString;
+    docNum:=qry.FieldByName('NumeroDoc').asString;
+    dataDoc:=qry.FieldByName('DataDoc').asString;
+    provenienza:=qry.FieldByName('provenienza').asString;
+    Destinatario:=qry.FieldByName('Destinatario').asString;
+    destinatario_ccn:=qry.FieldByName('destinatario_cc').asString;
+    subject:=qry.FieldByName('subject').asString;
+    show_note_private:=false;
+    if(qry.FieldByName('MostraNotePrivate').asString = 'T') then show_note_private:=true;
+
+      if(tipoDoc='O') then begin
+        //Ritenta l'invio mail (ORDINE)
+        SendOrderConfermationMail(db,codiceAgente,destinatario,docNum,dataDoc,provenienza,subject,show_note_private,destinatario_ccn, false);
+      end;
+
+      if(tipoDoc='R') then begin
+        //Ritenta l'invio mail (RESO)
+        SendResoConfermationMail(db,codiceAgente,destinatario,docNum,dataDoc,provenienza,subject,show_note_private,destinatario_ccn, false);
+      end;
+
+      if(tipoDoc='N') then begin
+        //Ritenta l'invio mail (NUOVO CLIENTE)
+        SendNotificationMail(db,codiceAgente,docNum,dataDoc,provenienza, false);
+      end;
+
+
+    qry.next;
+  end;
+  qry.close;
+end;
+
+//Invio mail alla mail specificata nelle tabelle MailOrdiniAgenti e MailOrdiniOrgComm
+//Controlla inolte se nota contiene fax/mail ed in caso affermativo tenta invia mail se possibile
+//Ritorna true se al cliente devo inviare un fax
+function SendFaxOrMail(db:TDatabase; fNameWithPath, fileFaxName, codiceAgente:string;docNum:Integer;dataDoc,provenienza,codiceCliente,codiceDestinazione:string):boolean;
+var
+  qry:TZQuery;
+  sql,email,fax,nota,subj,subjReso, orgComm,codReso,dataDocIt,dataDocEn,ragSoc,codicePredoc,descPredoc,numeroDocSede,numeroDocSedeMail,codiceAgenteReale:string;
+  send_mail_or_fax,esito, contains_reso, invia_reso_cliente,contains_order:boolean;
+begin
+  if(DebugMode()) or (FORCE_NO_MAIL=true) then begin
+    result:=true;
+    exit;
+  end;
+
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+  result:=false;
+
+  dataDocEn:=copy(dataDoc,1,4)+'/'+copy(dataDoc,5,2)+'/'+copy(dataDoc,7,2);
+  dataDocIt:=copy(dataDoc,7,2)+'/'+copy(dataDoc,5,2)+'/'+copy(dataDoc,1,4);
+
+  //Estraggo il codiceAgenteReale dal codicAgenteFiera
+  codiceAgenteReale:= GetCodiceAgente(db,codiceAgente,inttostr(docNum),dataDoc,provenienza);
+  if (codiceAgenteReale = '') then
+  begin
+    codiceAgenteReale := codiceAgente;
+  end;
+
+  //Estraggo ragione Sociale Cliente ed il codice Predoc (da docmaster)
+  ragSoc:='';
+  codicePredoc:='';
+  numeroDocSede:='';
+  qry.sql.add('SELECT replace(RagioneSociale,"''","") as ragioneSociale, CodicePredocL1, NumeroDocSede FROM docmaster WHERE codiceAgente="'+codiceAgente+'" AND dataDoc="'+dataDoc+'" AND numeroDoc="'+inttostr(docNum)+'" AND provenienza="'+provenienza+'" ');
+  qry.open;
+  if(not qry.eof) then ragSoc:=Trim(qry.FieldByName('RagioneSociale').asString);
+  if(not qry.eof) then codicePredoc:=Trim(qry.FieldByName('CodicePredocL1').asString);
+  if(not qry.eof) then numeroDocSede:=Trim(qry.FieldByName('NumeroDocSede').asString);
+  descPredoc:=GetDescPredoc(db,codicePredoc);
+  qry.sql.clear;
+  qry.close;
+
+  //Estraggo OrganizzazioneCommerciale Agente
+  orgComm:='IA01';
+  qry.sql.add('SELECT OrganizzazioneCommerciale FROM anagrage WHERE codiceAgente="'+codiceAgenteReale+'"'); //msorgato
+  qry.open;
+  if(not qry.eof) then
+  begin
+    orgComm:=Trim(qry.FieldByName('OrganizzazioneCommerciale').asString);
+  end;
+  qry.sql.clear;
+  qry.close;
+
+  //Estraggo Flag Invio Reso al cliente
+  invia_reso_cliente:=true;
+  qry.sql.add('SELECT FlagInvioResoCliente FROM automail WHERE OrganizzazioneCommerciale="'+orgComm+'"');
+  qry.open;
+  if(not qry.eof) then
+  begin
+    if(Trim(qry.FieldByName('FlagInvioResoCliente').asString) = '0') then invia_reso_cliente:=false;
+  end;
+  qry.sql.clear;
+  qry.close;
+
+  //verifico se il documento contiene un ordine vendita (qta1+qta2)>0
+  contains_order:=true;
+  qry.sql.text := Format('SELECT SUM(coalesce(QuantitaOrd_1,0) + coalesce(QuantitaOrd_2,0)) as tot from docdetails where codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" ',[codiceAgente,docNum,dataDoc,provenienza]);
+  qry.open;
+  if ((qry.eof) or (qry.FieldByName('tot').asInteger=0)) then contains_order:=false;
+  qry.close;
+  qry.sql.clear;
+
+
+  //Verifico se l'ordine contiene un reso
+  contains_reso:=false;
+  qry.sql.add('SELECT * FROM docResi WHERE codiceAgente="'+codiceAgente+'" AND dataDoc="'+dataDoc+'" AND numeroDoc="'+inttostr(docNum)+'" AND provenienza="'+provenienza+'" ');
+  qry.open;
+  if(not qry.eof) then
+  begin
+    contains_reso:=true;
+    codReso:=Trim(qry.FieldByName('codiceReso').asString);
+  end;
+  qry.sql.clear;
+  qry.close;
+
+  numeroDocSedeMail := numeroDocSede;
+
+  if(StrPadLeft(provenienza,2,'0')>='10')then
+    numeroDocSedeMail := provenienza + StrPadLeft(numeroDocSede,4,'0');
+
+  //Inizializzo oggetto mail in lingua in base all'orgComm
+  if(orgComm='IA01') or (orgComm='ZI01')then begin
+    subj:=Format('%s - Ordine agente numero: %s - Codice Cliente: %s - %s',[CodiceAgente,numeroDocSedeMail,CodiceCliente, descPredoc]);
+    subjReso:=Format('%s - Autorizzazione al reso %s dell''ordine %d del %s - Codice Cliente: %s',[CodiceAgente,codReso,docNum,dataDocIt,codiceCliente]);
+  end;
+  if(orgComm='DA01')then begin
+    subj:=Format('%s - Dokumentennummeragent: %s - Kundennummer: %s - %s',[CodiceAgente,numeroDocSedeMail,CodiceCliente, descPredoc]);
+    subjReso:=Format('%s - Genehmigung Fassungsruecknahme %s der Bestellung Nr. %d vom %s - Kundennummer: %s',[CodiceAgente,codReso,docNum,dataDocIt, codiceCliente]);
+  end;
+  if(orgComm='GA01')then begin
+    subj:=Format('%s - Order Number: %s - Customer Code: %s - %s',[CodiceAgente,numeroDocSedeMail,CodiceCliente, descPredoc]);
+    subjReso:=Format('%s - Return authorization %s of order number  %d of %s - Customer Code: %s',[CodiceAgente,codReso,docNum,dataDocIt, codiceCliente]);
+  end;
+  if(orgComm='FA01') or (orgComm='ZF01')then begin
+    subj:=Format('%s - Agent Document N. : %s - Code client: %s - %s',[CodiceAgente,numeroDocSedeMail,CodiceCliente, descPredoc]);
+    subjReso:=Format('%s - Autorisation du retour %s de la commande n. %d du %s - Code client: %s',[CodiceAgente,codReso,docNum,dataDocIt, codiceCliente]);
+  end;
+  if(orgComm='EA01')then begin
+    subj:=Format('%s - Agente Numero de documento: %s - Código cliente: %s - %s',[CodiceAgente,numeroDocSedeMail,CodiceCliente, descPredoc]);
+    subjReso:=Format('%s - Autorización para la devolución %s del pedido no. %d de fecha %s - Código cliente: %s',[CodiceAgente,codReso,docNum,dataDocIt, codiceCliente]);
+  end;
+  if(orgComm='PA01')then begin
+    subj:=Format('%s - AGENTE NUMERO DO DOCUMENTO: %s  - CODIGO DE CLIENTE: %s - %s',[CodiceAgente,numeroDocSedeMail,CodiceCliente, descPredoc]);
+    subjReso:=Format('%s - AUTORIZACAO DE DEVOLUCOES %s PEDIDO NUMERO %d DE %s  - CODIGO DE CLIENTE: %s',[CodiceAgente,codReso,docNum,dataDocIt, codiceCliente]);
+  end;
+  //default
+  if(subj='')then begin
+    subj:=Format('%s - Order Number: %s - Customer Code: %s - %s',[CodiceAgente,numeroDocSedeMail,CodiceCliente, descPredoc]);
+    subjReso:=Format('%s - Return authorization %s of order number %d of %s - Customer Code: %s',[CodiceAgente,codReso,docNum,dataDocIt,codiceCliente]);
+  end;
+
+  //Invio mail ai record relativi alla tabella MailOrdiniAgenti (con note pubbliche + private)
+  sql:='select * from mailordiniagenti where codiceAgente="'+codiceAgente+'" ';
+  qry.sql.add(sql);
+  qry.Open;
+  while not qry.Eof do
+  begin
+    email:=Trim(qry.FieldByName('Mail').asString);
+    if(email <> '') then begin
+      if(contains_order) then esito:=SendOrderConfermationMail(db,codiceAgente,email,inttostr(docNum),dataDoc,provenienza,subj, true, '', true);
+      if(contains_reso) then SendResoConfermationMail(db,codiceAgente,email,inttostr(docNum),dataDoc,provenienza,subjReso, true, '', true);
+    end;
+    qry.Next;
+  end;
+  qry.sql.clear;
+  qry.Close;
+
+  //Invio mail ai record relativi alla tabella MailOrdiniAgenti (con note pubbliche + private) per CodiceAgenteReale ricavato dal CodiceAgenteFiera msorgato
+  if (codiceAgenteReale <> codiceAgente) then
+  begin
+    sql:='select * from mailordiniagenti where codiceAgente="'+codiceAgenteReale+'" ';
+    qry.sql.add(sql);
+    qry.Open;
+    while not qry.Eof do
+    begin
+      email:=Trim(qry.FieldByName('Mail').asString);
+      if(email <> '') then begin
+        if(contains_order) then esito:=SendOrderConfermationMail(db,codiceAgente,email,inttostr(docNum),dataDoc,provenienza,subj, true, '', true);
+        if(contains_reso) then SendResoConfermationMail(db,codiceAgente,email,inttostr(docNum),dataDoc,provenienza,subjReso, true, '', true);
+      end;
+      qry.Next;
+    end;
+    qry.sql.clear;
+    qry.Close;
+  end;
+
+  //Invio mail ai record relativi alla tabella MailOrdiniOrgComm  (con note pubbliche + private)
+  //sql:='select * from mailordiniorgcomm where OrganizzazioneCommerciale in(select distinct OrganizzazioneCommerciale from anagrage where codiceAgente="'+codiceAgente+'")'; msorgato
+  sql:='select * from mailordiniorgcomm where OrganizzazioneCommerciale="'+orgComm+'"';
+  qry.sql.add(sql);
+  qry.Open;
+  while not qry.Eof do
+  begin
+    email:=Trim(qry.FieldByName('Mail').asString);
+    if((email<>'') and (contains_order)) then esito:=SendOrderConfermationMail(db,codiceAgente,email,inttostr(docNum),dataDoc,provenienza,subj, true, '', true);
+    if(contains_reso) then begin
+        email:=Trim(qry.FieldByName('MailResi').asString);
+        if(email<>'') then SendResoConfermationMail(db,codiceAgente,email,inttostr(docNum),dataDoc,provenienza,subjReso, true, '', true);
+    end;
+    qry.Next;
+  end;
+  qry.sql.clear;
+  qry.Close;
+
+
+  email:='';
+  fax:='';
+  //controllo campi customParam su docmaster per vedere se ho specificato manualmante mail o fax
+  sql:='select * from docMaster ';
+  sql:=sql+Format(' where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,docNum,dataDoc,provenienza]);
+  qry.sql.add(sql);
+  qry.Open;
+  if not qry.Eof then
+  begin
+    fax:=trim(qry.FieldByName('customParam2').asString);
+    email:=trim(qry.FieldByName('customParam1').asString);
+  end;
+  qry.sql.clear;
+  qry.close;
+
+
+  //controllo docnotes
+  sql:='select NotaOrdine from docNotes ';
+  sql:=sql+Format(' where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,docNum,dataDoc,provenienza]);
+  qry.sql.add(sql);
+  qry.Open;
+  nota:='';
+  send_mail_or_fax:=false;
+
+  //verifico se una delle note contiene la voce fax/mail
+  while not qry.Eof do
+  begin
+    nota:=qry.FieldByName('NotaOrdine').asString;
+    if((Pos('FAX/MAIL',UpperCase(nota)) > 0) OR (Pos('MAIL/FAX',UpperCase(nota)) > 0)) then
+      send_mail_or_fax:=true;
+      qry.Next;
+  end;
+
+  if(send_mail_or_fax=false)then
+  begin
+    //Controllo se l'organizzazioneCommerciale forza l'invio della mail/fax
+    qry.close;
+    qry.sql.clear;
+    qry.sql.add('select if(isnull(flag),0,flag) as flag from anagrage left join automail on(anagrage.organizzazionecommerciale=automail.organizzazionecommerciale) ');
+    //qry.sql.add('where anagrage.codiceAgente="'+codiceAgente+'" '); msorgato
+    qry.sql.add('where anagrage.codiceAgente="'+codiceAgenteReale+'" ');
+    qry.Open;
+    if not qry.Eof then
+    begin
+      if(qry.FieldByName('flag').asString='1') then send_mail_or_fax:=true;
+    end;
+    qry.close;
+  end;
+
+  //se devo estraggo fax dell'anagrafica
+  if(send_mail_or_fax)then
+  begin
+    //devo inviare fax o mail
+    if (fax='') and (email='') then
+    begin
+      //nei customParam non era specificato nulla --> ricavo dati dall'anagrafica cliente
+      if(left(codiceCliente,1)='9')then
+      begin
+        //estraggo numero fax da nuova anagrafica (testo anche ragionesociale)
+        qry.sql.Clear;
+        sql:='select * from docAnagCli ';
+        sql:=sql+Format(' where codiceCliente=''%s'' AND codiceAgente=''%s'' and replace(RagioneSociale,"''","")=''%s'' ',[codiceCliente,CodiceAgente,ragSoc]);
+        qry.sql.add(sql);
+        qry.Open;
+        if not qry.Eof then
+        begin
+          fax:=trim(qry.FieldByName('fax').asString);
+          email:=trim(qry.FieldByName('indirizzoEmail').asString);
+        end;
+        qry.Close;
+      end
+      else
+      begin
+        qry.sql.Clear;
+        sql:='select * from anagrCli ';
+        sql:=sql+Format(' where codiceCliente=''%s'' AND codicespedizione=''%s'' ',[codiceCliente,codiceDestinazione]);
+        qry.sql.add(sql);
+        qry.Open;
+        if not qry.Eof then
+        begin
+          fax:=trim(qry.FieldByName('fax').asString);
+          email:=trim(qry.FieldByName('Email').asString);
+        end;
+        qry.Close;
+      end;
+      email:=trim(email);
+      fax:=trim(fax);
+    end;
+
+    //se c' mail mando quella (con sole note pubbliche)
+    esito:=false;
+    if(email<>'')then
+    begin
+      if(contains_order) then esito:=SendOrderConfermationMail(db,codiceAgente,email,inttostr(docNum),dataDoc,provenienza,subj, false, '', true);
+      if(invia_reso_cliente)then begin
+        //20100909 --> non invio reso al cliente se il flag in automail non lo permette
+        if(contains_reso) then SendResoConfermationMail(db,codiceAgente,email,inttostr(docNum),dataDoc,provenienza,subjReso, false, '', true);
+        if esito then db.executesql(Format('insert into logmail(data,email) VALUES(NOW(),''%s'') ',[email]));    //log
+      end;
+    end;
+    if(not esito)then
+    begin
+      //se invece ho un numero di fax (oppure fallito invio mail) invio fax (metto richiesta in coda)
+      if(fax<>'')then
+      begin
+        AddToOutput(Format('%s: Accodo invio fax per il cliente "%s" da agente "%s" al numero %s', [timetostr(time),codiceCliente,codiceAgente,fax]),true,2,33);
+        AddToLog(Format('%s: Accodo invio fax per il cliente "%s" da agente "%s" al numero %s', [timetostr(time),codiceCliente,codiceAgente,fax]));
+        ForceDirectories(gToPC_fax_dir);
+        CopyFile(fNameWithPath,gToPC_fax_dir+'\n'+fax+'-'+fileFaxName,true);
+        defaultDB.executesql(Format('insert into logmail(data,fax) VALUES(NOW(),''%s'') ',[fax]));
+        result:=true;
+      end;
+    end;
+  end;
+  qry.Close;
+  qry.Free;
+end;
+
+//Aggiunge la riga 04 (se necessario) per indicare la ragione sociale del nuovo cliente
+//ritorna true se la linea  stata aggiunta, false altrimenti
+function ExportDocNewCli(db:TDatabase; fNameWithPath,codiceAgente:string;docNum:Integer;dataDoc,provenienza:string):boolean;
+var
+  qry:TZQuery;
+  F: TextFile;
+  sql:string;
+begin
+  result:=true;
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+  sql:='select RagioneSociale,if((left(CodiceCliente,2)=''99'' or (LEFT(CodiceDestinazione,2)=''99'') AND CodiceDestinazione <> ""),''00S'',''00N'') as ALTRO from docMaster ';
+  sql:=sql+Format(' where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,docNum,dataDoc,provenienza]);
+  qry.sql.add(sql);
+  qry.Open;
+  if not qry.Eof then
+  begin
+    if(qry.FieldByName('Altro').asString = '00S')then
+    begin
+      f:=TextFile.Create();
+      f.AssignFile(fNameWithPath);
+      f.Append();
+      f.WriteLn('04'+strPadRight(qry.FieldByName('RagioneSociale').asString,35,' '));
+      f.CloseFile();
+      f.Free();
+      //invio mail notifica
+      result:=SendNotificationMail(db,codiceAgente,IntToStr(docNum),dataDoc, provenienza, true);
+    end;
+  end;
+  qry.Free;
+end;
+
+
+// note documento
+function ExportDocNotes(db:TDatabase; fNameWithPath,codiceAgente:string;docNum:Integer;provenienza,datadoc:string;isReso:boolean):boolean;
+var
+  sql,prefix,nota,suffix:string;
+  qry:TZQuery;
+  contatoreRiga:integer;
+  F: TextFile;
+  res1,res2:boolean;
+begin
+  result:=true;
+  res1:=false;
+  res2:=false;
+
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+
+  f:=TextFile.Create();
+  f.AssignFile(fNameWithPath);
+  f.Append();
+
+  // note
+  sql:='select ';
+  sql:=sql+'"03" as TR,IndiceNota+1 AS numeroRiga,notaOrdine as TEXTLINE from DocNotes  ';
+  sql:=sql+Format('where codiceAgente="%s" ',[codiceAgente]);
+  sql:=sql+Format('and NumeroDoc="%d" ',[docNum]) ;
+  sql:=sql+Format('and DataDoc="%s" ',[dataDoc]);
+  sql:=sql+Format('and provenienza="%s" ',[provenienza]);
+  if(isReso=false) then begin
+    //se non sono in export reso stampo solo note che non iniziano con ~
+    sql:=sql+'and notaOrdine not like "~%" ';
+  end
+  else begin
+    //Se è un export per resi, stampo solop note ~ ed aggiungo anche le note inserite in docResi
+    sql:=sql+'and notaOrdine like "~%" ';
+    sql:=sql+'UNION ';
+    sql:=sql+'SELECT ';
+    sql:=sql+'"03" AS TR,0 AS numeroRiga,NotaReso AS TEXTLINE FROM docResi ';
+    sql:=sql+Format('WHERE codiceAgente="%s" AND numeroDoc="%d" AND dataDoc="%s" AND provenienza="%s" AND NotaReso<>"" ',[codiceAgente,docNum,dataDoc,provenienza]);
+  end;
+  qry.sql.add(sql);
+  qry.Open;
+  contatoreRiga:=1;
+  if not qry.Eof then
+  begin
+    prefix:=strPadRight(qry.FieldByName('TR').asString,2,' ');
+
+    while not qry.Eof do
+    begin
+      nota:=trim(qry.FieldByName('TEXTLINE').asString);
+      while length(nota)>0 do
+      begin
+        suffix:=strPadLeft(inttostr(contatoreRiga),3,'0');
+        suffix:=suffix+strPadRight(Left(nota,40),40,' ');
+        nota:=mid(nota,41,length(nota));
+        f.WriteLn(prefix+suffix);
+        contatoreRiga:=contatoreRiga+1;
+      end;
+      qry.next;
+    end;
+    result:=true;
+  end;
+  qry.Close;
+
+  //Esporto eventualmente fax e mail specificati nel customparam
+  qry.sql.clear;
+  sql:='select customParam1, customParam2 from docmaster ';
+  sql:=sql+Format('where codiceAgente="%s" ',[codiceAgente]);
+  sql:=sql+Format('and NumeroDoc="%d" ',[docNum]) ;
+  sql:=sql+Format('and DataDoc="%s" ',[dataDoc]);
+  sql:=sql+Format('and provenienza="%s" ',[provenienza]);
+  qry.sql.add(sql);
+  qry.Open;
+  if not qry.Eof then
+  begin
+    //esporto email se presente
+    nota:=trim(qry.FieldByName('customParam1').asString);
+    if(nota<>'') then
+    begin
+      f.WriteLn('03'+strPadLeft(inttostr(contatoreRiga),3,'0')+left(strPadRight('Email: '+nota,40,' '),40));
+      contatoreRiga:=contatoreRiga+1;
+    end;
+    //esporto fax se presente
+    nota:=trim(qry.FieldByName('customParam2').asString);
+    if(nota<>'') then
+    begin
+      f.WriteLn('03'+strPadLeft(inttostr(contatoreRiga),3,'0')+left(strPadRight('Fax: '+nota,40,' '),40));
+      contatoreRiga:=contatoreRiga+1;
+    end;
+  end;
+  qry.Close();
+  qry.Free;
+
+  f.CloseFile();
+  f.Free();
+end;
+
+
+//Lorenzo 2022.07.21
+function createFileCsvnewcustumers(db:TDatabase;nomeFileCsvnc:string):boolean;
+ var
+    qry:TZQuery;
+    csv:TStringList;
+    sql,currentRow,prec1,nomeFileCsv:string;
+ begin
+  result:=true;
+  csv:=TStringList.create;
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+//  intestazione
+  	currentRow:='';
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'prova');
+    csv.Append(currentRow);
+//sold_to
+  sql:='SELECT ';
+  sql:=sql+'REPLACE(REPLACE(REPLACE(CAST(NOW() AS CHAR)," ",""),"-",""),":","") as Data, ';
+  sql:=sql+'SUBSTRING(CodiceCliente,1, 6) AS CodiceCliente, ';
+  sql:=sql+'CodiceAgente, ';
+  sql:=sql+'RagioneSociale, ';
+  sql:=sql+'indirizzoEmail, ';
+  sql:=sql+'Indirizzo, ';
+  sql:=sql+'Citta, ';
+  sql:=sql+'Provincia, ';
+  sql:=sql+'CAP, ';
+  sql:=sql+'Telefono, ';
+  sql:=sql+'Banca, ';
+  sql:=sql+'Abi, ';
+  sql:=sql+'DescrizionePag, ';
+  sql:=sql+'CodicePag, ';
+  sql:=sql+'CodiceListino, ';
+  sql:=sql+'DescrizioneAggiuntiva, ';
+  sql:=sql+'Fax, ';
+  sql:=sql+'DescrizioneAggiuntiva2, ';
+  sql:=sql+'DescrizioneAggiuntiva3, ';
+  sql:=sql+'Cab, ';
+  sql:=sql+'CC, ';
+  sql:=sql+'NotaDocDefault, ';
+  sql:=sql+'Cin, ';
+  sql:=sql+'CF, ';
+  sql:=sql+'Pec, ';
+  sql:=sql+'PIVA_Long, ';
+  sql:=sql+'RagSocGruppoAcq, ';
+  sql:=sql+'Sdi, ';
+  sql:=sql+'EmailFattPec ';
+  sql:=sql+'FROM docanagcli WHERE DocAnagCli_EXPORTED_=2 ';
+  sql:=sql+'ORDER BY CodiceCliente';
+  prec1:='start';
+  qry.sql.text:=sql;
+  qry.open
+    while not qry.eof do begin
+
+      currentRow:='';
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'CodiceCliente');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'CodiceAgente');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'RagioneSociale');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'indirizzoEmail');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Indirizzo');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Citta');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Provincia');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'CAP');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Telefono');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Banca');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Abi');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'DescrizionePag');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'CodicePag');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'CodiceListino');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'DescrizioneAggiuntiva');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Fax');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'DescrizioneAggiuntiva3');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Cab');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'CC');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'NotaDocDefault');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Cin');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'CF');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Pec');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'PIVA_Long');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'RagSocGruppoAcq');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'Sdi');
+      currentRow:=currentRow+EscapeCsvFieldRec(qry,'EmailFattPec');
+
+     if(CompareStr(EscapeCsvFieldRec(qry,'CodiceCliente'),prec1)<>0)then
+      nomeFileCsv:='sold_to_'+EscapeCsvFieldRec(qry,'CodiceCliente')+'_'+EscapeCsvFieldRec(qry,'Data')+'.csv';
+
+      csv.Append(currentRow);
+      csv.SaveToFile(nomeFileCsv);
+      prec1:=EscapeCsvFieldRec(qry,'CodiceCliente');
+      qry.next;
+    end;
+   qry.close;
+
+   end;
+
+
+//Lorenzo end
+
+function createFileCsvInventario(db:TDatabase;codiceAgente,numeroDocumento,dataDocumento,provenienza,codiceInventario,nomeFileCsv:string):boolean;
+var
+  qry:TZQuery;
+  csv:TStringList;
+  sql,currentRow:string;
+  orgComm,codiceCliente,codiceFornitore,ragioneSociale,esercizio:string;
+begin
+  result:=true;
+  csv:=TStringList.create;
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+
+  //intestazione CSV
+  currentRow:='';
+  currentRow:=currentRow+EscapeCsvField('WERKS');
+  currentRow:=currentRow+EscapeCsvField('VKGRP');
+  currentRow:=currentRow+EscapeCsvField('KUNNR');
+  currentRow:=currentRow+EscapeCsvField('NAME1');
+  currentRow:=currentRow+EscapeCsvField('IBLNR');
+  currentRow:=currentRow+EscapeCsvField('GJAHR');
+  currentRow:=currentRow+EscapeCsvField('ZEILI');
+  currentRow:=currentRow+EscapeCsvField('CHARG');
+  currentRow:=currentRow+EscapeCsvField('MATNR');
+  currentRow:=currentRow+EscapeCsvField('J_3ASIZE');
+  currentRow:=currentRow+EscapeCsvField('VSP');
+  currentRow:=currentRow+EscapeCsvField('MAKTX');
+  currentRow:=currentRow+EscapeCsvField('KULAB');
+  currentRow:=currentRow+EscapeCsvField('ERFMG');
+  currentRow:=currentRow+EscapeCsvField('XNULL');
+  currentRow:=currentRow+EscapeCsvField('TERM');
+  csv.Append(currentRow);
+
+
+  sql:='SELECT COALESCE(docdetails.quantitaOrd_1,0) AS qtaAge, IF(docdetails.quantitaOrd_1=0 OR docdetails.quantitaOrd_1 IS NULL,"X","") AS flagAge,  invcampionariorep.* ';
+  sql:=sql+'FROM invcampionariorep ';
+  sql:=sql+'LEFT JOIN docdetails ON( ';
+  sql:=sql+'  invcampionariorep.matnr =  MID(docdetails.codiceArticolo,1,LENGTH(TRIM(docdetails.codiceArticolo))-LENGTH(CONCAT(TRIM(docdetails.row),TRIM(docdetails.col)))) ';
+  sql:=sql+'  AND invcampionariorep.ValoreMatrice = CONCAT(TRIM(docdetails.col),TRIM(docdetails.row)) ';
+  sql:=sql+'  AND invcampionariorep.CodiceAgente=docdetails.codiceAgente ';
+  sql:=sql+'  AND docdetails.numeroDoc="'+numeroDocumento+'" AND docdetails.dataDoc="'+dataDocumento+'" AND docdetails.codiceAgente="'+codiceAgente+'" AND docdetails.provenienza="'+provenienza+'" ';
+  sql:=sql+') ';
+  sql:=sql+'WHERE invcampionariorep.codiceAgente="'+codiceAgente+'" AND invcampionariorep.NRifInv="'+codiceInventario+'" ';
+  sql:=sql+'ORDER BY DocInventario, NRiga ';
+  qry.sql.text:=sql;
+  qry.open;
+  while not qry.eof do begin
+    currentRow:='';
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'OrgComm');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'CodiceAgente');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'CodiceCliente');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'RagioneSociale');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'DocInventario');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'Esercizio');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'NRiga');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'NPartita');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'Matnr');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'ValoreMatrice');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'VS');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'DescrizioneMateriale');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'Qta');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'QtaAge');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'flagAge');
+    currentRow:=currentRow+EscapeCsvField('X');
+    csv.Append(currentRow);
+
+    if(orgComm='') then begin
+      //la prima volta memorizzo i dampi che poi mi serviranno nella seconda parte di export (articoli non presentei in invcamprep)
+      orgComm:=EscapeCsvFieldRec(qry,'OrgComm');
+      codiceCliente:=EscapeCsvFieldRec(qry,'codiceCliente');
+      codiceFornitore:=EscapeCsvFieldRec(qry,'codiceFornitore');
+      ragioneSociale:=EscapeCsvFieldRec(qry,'ragioneSociale');
+      esercizio:=EscapeCsvFieldRec(qry,'esercizio');
+    end;
+    qry.next;
+  end;
+  qry.close;
+
+
+  //Aggiungo righe di docdetails non presenti in invcamprep
+  sql:='SELECT COALESCE(docdetails.quantitaOrd_1,0) AS qtaAge, IF(docdetails.quantitaOrd_1=0 OR docdetails.quantitaOrd_1 IS NULL,"X","") AS flagAge, ';
+  sql:=sql+'MID(docdetails.codiceArticolo,1,LENGTH(TRIM(docdetails.codiceArticolo))-LENGTH(CONCAT(TRIM(docdetails.row),TRIM(docdetails.col)))) as modello, ';
+  sql:=sql+'CONCAT(TRIM(docdetails.col),TRIM(docdetails.row)) AS matrice, docdetails.descrizioneProdotto ';
+  sql:=sql+'FROM docdetails ';
+  sql:=sql+'LEFT JOIN invcampionariorep ON( ';
+  sql:=sql+'  invcampionariorep.matnr =  MID(docdetails.codiceArticolo,1,LENGTH(TRIM(docdetails.codiceArticolo))-LENGTH(CONCAT(TRIM(docdetails.row),TRIM(docdetails.col)))) ';
+  sql:=sql+'  AND invcampionariorep.ValoreMatrice = CONCAT(TRIM(docdetails.col),TRIM(docdetails.row)) ';
+  sql:=sql+'  AND invcampionariorep.CodiceAgente=docdetails.codiceAgente ';
+  sql:=sql+'  AND invcampionariorep.codiceAgente=docdetails.codiceAgente AND invcampionariorep.NRifInv="'+codiceInventario+'" ';
+  sql:=sql+') ';
+  sql:=sql+'WHERE docdetails.numeroDoc="'+numeroDocumento+'" AND docdetails.dataDoc="'+dataDocumento+'" AND docdetails.codiceAgente="'+codiceAgente+'" AND docdetails.provenienza="'+provenienza+'" ';
+  sql:=sql+'AND invcampionariorep.matnr IS NULL ';
+  qry.sql.text:=sql;
+  qry.open;
+  while not qry.eof do begin
+    currentRow:='';
+    currentRow:=currentRow+orgComm;
+    currentRow:=currentRow+EscapeCsvField(codiceAgente);
+    currentRow:=currentRow+codiceCliente;
+    currentRow:=currentRow+ragioneSociale;
+    currentRow:=currentRow+EscapeCsvField('');
+    currentRow:=currentRow+esercizio;
+    currentRow:=currentRow+EscapeCsvField('');
+    currentRow:=currentRow+EscapeCsvField('');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'modello');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'matrice');
+    currentRow:=currentRow+EscapeCsvField('');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'descrizioneProdotto');
+    currentRow:=currentRow+EscapeCsvField('0');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'QtaAge');
+    currentRow:=currentRow+EscapeCsvFieldRec(qry,'flagAge');
+    currentRow:=currentRow+EscapeCsvField('X');
+    csv.Append(currentRow);
+    qry.next;
+  end;
+  qry.close;
+
+
+  csv.SaveToFile(nomeFileCsv);
+end;
+
+//Federico 20171002: Aggiunta trascodifica numero doc da iPad verso Gestionale
+function transcodificaNumDocMasterToNumDocGestionale(db:TDatabase; var di: TDocInfo): integer;
+var
+  sql: string;
+  numerodocgestionale: integer;
+  qry: TZQuery;
+  bRet: boolean;
+begin
+  result := -1;
+  qry := TZQuery.Create(nil);
+  try
+    qry.Connection := TZConnection(db);
+    sql := Format('select NumeroDocumento from transcodificaordinipad WHERE CodiceAgenteIpad = "%s" AND NumeroDocIpad = "%d" AND ProvenienzaIpad = "%s" AND DataDocIpad = "%s" AND TipoDocumento = "%s"', [di.agentCode, di.docNumber, di.prov, di.dateDoc, di.infotype]);
+    debugstr(sql);
+    qry.SQL.text := sql;
+    qry.open;
+    if (trim(qry.FieldByName('NumeroDocumento').AsString) <> '') then
+    begin
+      result := strtoint(trim(qry.FieldByName('NumeroDocumento').AsString));
+      qry.free;
+    end
+    else
+    begin
+      sql := Format('SELECT MAX(NumeroDocumento) AS MaxNumeroDocumento FROM transcodificaordinipad WHERE CodiceAgenteReale = "%s" AND ProvenienzaIpad = "%s" AND TipoDocumento = "%s"', [di.realAgentCode, di.prov, di.infotype]);
+      debugstr(sql);
+      qry.SQL.text := sql;
+      qry.open;
+      if trim(qry.FieldByName('MaxNumeroDocumento').AsString) = '' then
+        begin
+          //if (di.agentCode = di.realAgentCode) then
+          //  sql := Format('SELECT NumeroDoc AS MaxNumeroDocumento from docmaster WHERE CodiceAgente = "%s" AND NumeroDoc = "%d" AND Provenienza = "%s" AND DataDoc = "%s"', [di.realAgentCode, di.docNumber, di.prov, di.dateDoc])
+          //else
+          sql := Format('SELECT MAX(NumeroDoc) AS MaxNumeroDocumento from docmaster WHERE CodiceAgente = "%s" AND Provenienza = "%s" and DocMaster_EXPORTED_ = 3', [di.realAgentCode, di.prov]);
+          debugstr(sql);
+          qry.SQL.text := sql;
+          qry.open;
+          if trim(qry.FieldByName('MaxNumeroDocumento').AsString) = '' then
+            numerodocgestionale := 0
+          else
+            numerodocgestionale := strtoint(trim(qry.FieldByName('MaxNumeroDocumento').AsString));
+            //if (di.agentCode = di.realAgentCode) then
+            //  numerodocgestionale := numerodocgestionale - 1;
+        end
+      else
+        numerodocgestionale := strtoint(trim(qry.FieldByName('MaxNumeroDocumento').AsString));
+
+      sql := FORMAT('REPLACE INTO transcodificaordinipad (CodiceAgenteIpad,NumeroDocIpad,DataDocIpad,ProvenienzaIpad,CodiceAgenteReale,TipoDocumento,NumeroDocumento) VALUES ("%s", "%d", "%s", "%s", "%s", "%s", "%d") ', [di.agentCode, di.docNumber, di.dateDoc, di.prov, di.realAgentCode, di.infotype, numerodocgestionale + 1]);
+      debugstr(sql);
+      bRet := FullExecuteSql(db, sql);
+      if bRet then
+        result := numerodocgestionale + 1;
+      qry.free;
+    end;
+  except
+    result := -1;
+    qry.free;
+  end;
+end;
+//Federico 20171002: End
+
+//Federico 20171004: Aggiunta verifica agnete district o regional e estrapolazione agente reale
+function getRealAgentCode(db:TDatabase; var di: TDocInfo): string;
+var
+  sql: string;
+  qry: TZQuery;
+begin
+  qry := TZQuery.Create(nil);
+  try
+    qry.Connection := TZConnection(db);
+    sql := Format('SELECT COUNT(*) AS CountAgenteDistrictRegional FROM crm_relagenti WHERE CodiceDistrict = "%s" OR CodiceRegional = "%s" ', [di.agentCode, di.agentCode]);
+    debugstr(sql);
+    qry.SQL.text := sql;
+    qry.open;
+    if (trim(qry.FieldByName('CountAgenteDistrictRegional').AsString) = '0') then
+    begin
+      result := di.agentCode;
+      qry.free;
+    end
+    else
+    begin
+      sql := 'SELECT agenti_clienti.CodiceAgente AS CodiceAgenteReale FROM agenti_clienti ';
+      sql := sql + 'JOIN lineeage ON agenti_clienti.OrganizzazioneCommerciale=lineeage.OrganizzazioneCommerciale AND agenti_clienti.ZonaClienteDoor=lineeage.Zona AND agenti_clienti.CodiceAgente=lineeage.CodiceAgente ';
+      sql := sql + Format('WHERE CodiceCliente="%s" AND CodiceSpedizione="%s" AND CodiceLinea = "%s" ', [di.codiceCliente, di.codiceDestinazione, di.linea]);
+      debugstr(sql);
+      qry.SQL.text := sql;
+      qry.open;
+      if trim(qry.FieldByName('CodiceAgenteReale').AsString) = '' then
+        begin
+          result := di.agentCode;
+          qry.free;
+        end
+      else
+        begin
+        result := trim(qry.FieldByName('CodiceAgenteReale').AsString);
+        qry.free;
+        end;
+    end;
+  except
+    result := di.agentCode;
+    qry.free;
+  end;
+end;
+//Federico 20171002: End
+
+function DoExport(db:TDatabase):boolean;
+var
+   sql,oldCodAge,codiceAgente,codiceAgenteFittizio,dataDocumento,provenienza,fOutFName,fRname,codiceReso,codiceCliente,codiceDestinazione,oldProgWeb,progWeb,oldTipoOrd,linea:string;
+   fOutFNameB, fName4U, tipoConvention,codicePromo,nomeFilePdfCS,nomeFilePdfCtrl,nomeFileCsv,nomeFilePdfAge,codCliInv:string;
+   numeroDocumento,new_num:integer;
+   qryDocMaster,qryGetNumber,qry,qryResi,qrydatecons:TZQuery;
+   params,exported_files:TStringList;
+   alfabeto:string;
+   esito_export,esito_ftp,trovati_resi,expNoteRicambi,is_ordine_vendita:boolean;
+   sub_index,tot_qta_rese,alfabeto_idx, file_index:integer;
+   lettera,subj,email,tipoOrdine,codAgeExport,oldProgWebRic,flagConsAnt,orgCommAge,datacons,linguaAge:string;
+   is_inventario_carico, is_inventario_reso:boolean;
+   codiceInventario,folderPath:string;
+   gestionaleDocNum,numeroDocumentoSede,descPredoc,codicePredoc:string;
+   di: TDocInfo;
+begin
+  result:=true;
+  params:=TStringList.create;
+  exported_files:=TStringList.create;
+
+  AddToOutput(Format('%s: inizio esportazione ordini (versione: %s)...',[timetostr(time),gEXPVERSION]),true,1,11);
+  AddToOutput('',true,-1,5);
+  qryDocMaster:=TZQuery.create(nil);
+  qryDocMaster.connection:=TZConnection(db);
+  qryGetNumber:=TZQuery.create(nil);
+  qryGetNumber.connection:=TZConnection(db);
+  qry:=TZQuery.create(nil);
+  qry.connection:=TZConnection(db);
+  qryResi:=TZQuery.create(nil);
+  qryResi.connection:=TZConnection(db);
+  qrydatecons:=TZQuery.create(nil);
+  qrydatecons.connection:=TZConnection(db);
+  alfabeto:='abcdefghijklmnopqrstuvwxyz ';  //nb: ultimo carattere=spazio usato per ordini singoli
+
+
+  //Creo se non esistono tabelle per gestione agenti con zone in comune
+  db.CreateTableFromDef(gToPC_export_defsDir+'\commonagecounter.def','commonagecounter',false,false);
+  db.CreateTableFromDef(gToPC_export_defsDir+'\commontorealage.def','commontoreal',false,false);
+
+  //Cerco eventuali ordini di zone comuni e le relaziono all'agente fittizio
+  qryDocMaster.sql.add('select distinct commonage.AgenteFittizio,docmaster.CodiceAgente,docmaster.NumeroDoc,docmaster.DataDoc,docmaster.Provenienza ');
+  qryDocMaster.sql.add('from anagrcli_door_zona ');
+  qryDocMaster.sql.add('join docmaster on(docmaster.codicecliente=anagrcli_door_zona.codicecliente and docmaster.codicedestinazione=anagrcli_door_zona.codicespedizione) ');
+  qryDocMaster.sql.add('join commonage on(commonage.AgenteReale=docmaster.CodiceAgente and commonage.zonaComune=anagrcli_door_zona.ZonaClienteDoor) ');
+  qryDocMaster.sql.add('where provenienza=0 and docMaster_exported_=2 ');
+  qryDocMaster.open;
+  esito_export:=true;
+  while not qryDocMaster.eof do
+  begin
+    codiceAgente:=trim(qryDocMaster.FieldByName('codiceAgente').asString);
+    codiceAgenteFittizio:=trim(qryDocMaster.FieldByName('AgenteFittizio').asString);
+    numeroDocumento:=qryDocMaster.FieldByName('NumeroDoc').asinteger;
+    dataDocumento:=trim(qryDocMaster.FieldByName('DataDoc').asString);
+    provenienza:=trim(qryDocMaster.FieldByName('provenienza').asString);
+    //Ottengo prossimo numero ordine per l'agente fittizio
+    sql:=Format('select if(max(NumeroUltimoDocumento) is null,1,max(NumeroUltimoDocumento)+1) as num from commonagecounter where AgenteFittizio=''%s''',[codiceAgenteFittizio]);
+    qryGetNumber.sql.add(sql);
+    qryGetNumber.open;
+    new_num:=qryGetNumber.FieldByName('num').asinteger;
+    qryGetNumber.sql.clear;
+    qryGetNumber.close;
+    if(new_num>1)then
+    begin
+      sql:=Format('update commonagecounter set NumeroUltimoDocumento=''%d'' WHERE  AgenteFittizio=''%s''',[new_num,codiceAgenteFittizio])
+      db.ExecuteSql(sql);
+    end
+    else
+    begin
+      sql:=Format('insert into commonagecounter(AgenteFittizio,NumeroUltimoDocumento) VALUES(''%s'',1)',[codiceAgenteFittizio]);
+      db.ExecuteSql(sql);
+    end;
+    //relaziono numero document agente fittizio con quello reale nella tabellacommontorealage
+    sql:=Format('insert into commontoreal(CodiceAgenteReale, NumeroDoc, DataDoc, Provenienza, AgenteFittizio, NumeroDocAgenteFittizio)values(''%s'',''%d'',''%s'',''%s'',''%s'',''%d'') ',[CodiceAgente, numeroDocumento, DataDocumento, Provenienza, codiceAgenteFittizio, new_num]);
+    db.ExecuteSql(sql);
+    qryDocMaster.Next;
+
+    //modifico docmaster in modo che gli ordini provengano dall'agente fittizio con il proprio progressivo
+    sql:=Format('update docMaster set CodiceAgente=''%s'',NumeroDoc=%d where CodiceAgente=''%s'' and NumeroDoc=%d and DataDoc=''%s'' and provenienza=''%s'' ',[codiceAgenteFittizio,new_num,codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    db.ExecuteSql(sql);
+
+    //modifico docdetails in modo che gli ordini provengano dall'agente fittizio con il proprio progressivo
+    sql:=Format('update docDetails set CodiceAgente=''%s'',NumeroDoc=%d where CodiceAgente=''%s'' and NumeroDoc=%d and DataDoc=''%s'' and provenienza=''%s'' ',[codiceAgenteFittizio,new_num,codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    db.ExecuteSql(sql);
+  end;
+
+
+
+
+  qryDocMaster.sql.clear;
+  qryDocMaster.close;
+
+  //ESPORTAZIONE DOCUMENTI INVENTARIO CONFERMATI
+  qryDocMaster.sql.text:='select * from docMaster where docMaster_exported_=2 and Linea="INV" and (provenienza=0 or provenienza>=10)';
+  qryDocMaster.open;
+  while not qryDocMaster.eof do
+  begin
+    //carico i dettagli del documento inventariale
+    codiceAgente:=trim(qryDocMaster.FieldByName('codiceAgente').asString);
+    numeroDocumento:=qryDocMaster.FieldByName('NumeroDoc').asinteger;
+    dataDocumento:=trim(qryDocMaster.FieldByName('DataDoc').asString);
+    provenienza:=trim(qryDocMaster.FieldByName('provenienza').asString);
+    progWeb:=Trim(qryDocMaster.FieldByName('NumeroDocSede').asString);
+    is_inventario_carico:=false;
+    is_inventario_carico:=false;
+    codiceInventario:='';
+    is_inventario_carico:=(trim(qryDocMaster.FieldByName('Linea').asString)='INV') and (mid(qryDocMaster.FieldByName('CustomParam4').asString,1,1)<>'#');
+    is_inventario_reso:=(trim(qryDocMaster.FieldByName('Linea').asString)='INV') and (mid(qryDocMaster.FieldByName('CustomParam4').asString,1,1)='#');
+    codiceInventario:=trim(qryDocMaster.FieldByName('CustomParam4').asString);
+    if(mid(codiceInventario,1,1)='#') then codiceInventario:=mid(codiceInventario,2,99);
+
+    if(is_inventario_carico) then begin
+      //devo solo inviare il pdf di conferm via mail, nessun export a SAP è necessario
+      folderPath:=Format('common\backup\mail_inv\%s\',[Mid(GetTimeStamp(),1,6)]);
+      ForceDirectories(folderPath);
+      nomeFilePdfCtrl:=folderPath + 'inventory_ctr_'+codiceInventario+'_'+codiceAgente+'_'+dataDocumento+'_'+provenienza+'.pdf'
+      nomeFilePdfCS:=folderPath + 'inventory_cs_'+codiceInventario+'_'+codiceAgente+'_'+dataDocumento+'_'+provenienza+'.pdf'
+      nomeFilePdfAge:=folderPath + 'inventory_age_'+codiceInventario+'_'+codiceAgente+'_'+dataDocumento+'_'+provenienza+'.pdf'
+      nomeFileCsv:=folderPath + 'inventory_csv_'+codiceInventario+'_'+codiceAgente+'_'+dataDocumento+'_'+provenienza+'.csv'
+      createFileCsvInventario(db,codiceAgente,inttostr(numeroDocumento),dataDocumento,provenienza, codiceInventario, nomeFileCsv);
+//lorenzo
+       createFileCsvnewcustumers(db ,nomeFileCsvnc);
+      //invio pdf al controller
+      AppendDocToPdf(db,codiceAgente,inttostr(numeroDocumento),dataDocumento,provenienza,GetLinguaAgente(db, codiceAgente),nomeFilePdfCtrl,GetEmailControllerRep(db,codiceAgente),'inventario', true, '');
+
+      //invio pdf al CS (con allegato csv)
+      AppendDocToPdf(db,codiceAgente,inttostr(numeroDocumento),dataDocumento,provenienza,GetLinguaAgente(db, codiceAgente),nomeFilePdfCS,GetEmailCSRep(db,codiceAgente),'inventario', true, nomeFileCsv);
+
+      //invio pdf all'agente (uso mostro qta inventgiacenza)
+      AppendDocToPdf(db,codiceAgente,inttostr(numeroDocumento),dataDocumento,provenienza,GetLinguaAgente(db, codiceAgente),nomeFilePdfAge,GetEmaiAgente(db,codiceAgente),'inventario', false , '');
+
+      //Imposto come elaborato
+  	  sql:=Format('update docmaster set docmaster_exported_=3 where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+  	  db.executeSql(sql);
+    end;
+
+    if(is_inventario_reso) then begin
+      //si tratta di un reso di inventario, invio a sap con tracciato reso standard
+      codCliInv:=GetResoInvCodiceCliente(db, codiceAgente);
+
+      //trovo progressivo Reso
+      if(progWeb = '')then begin
+        //ricavo coma max agente+1
+        sql:=Format('select coalesce(max(numerodocsede)+1,1) as P from (select numerodocsede from docmaster where CodiceAgente="%s" and Linea="INV" and NumerodocSede is not null)  astmp ',[codiceAgente]);
+        qryGetNumber.sql.text:=sql;
+        qryGetNumber.open;
+        progWeb:=qryGetNumber.FieldByName('p').asstring;
+        qryGetNumber.sql.clear;
+        qryGetNumber.close;
+      end;
+
+      //Esporto ordine con i resi per articolo fittizio
+      fRname:=codiceAgente+'C'+progWeb+'.txt';
+
+      //testata...
+      sql:='select "01" as TR, "'+codCliInv+'" as CodiceCliente, "" as CodiceDestinazione, docmaster.CodiceAgente, docmaster.DataDoc, docmaster.DataDoc as dataConsegna, ';
+      sql:=sql+'if((left(CodiceCliente,2)="99" or (LEFT(CodiceDestinazione,2)="99"),"00S","00N") as ALTRO, "R" as TipoLinea, ';
+      sql:=sql+'if(sum(docdetails.quantitaOrd_1)>3,1,0) as flagNumPezzi, ';
+      sql:=sql+'sum(docdetails.quantitaOrd_1) AS numeroPezzi, 0 as flagConsegnaAnticipata, "" as TipoDoc, "" as CodicePromo, "" AS B2BNonSapiamo, "" AS CheckCore ';
+      sql:=sql+'from docMaster left join docdetails on (docmaster.codiceAgente=docdetails.codiceAgente and docmaster.numeroDoc=docdetails.numeroDoc and docmaster.dataDoc=docdetails.dataDoc and docmaster.provenienza=docdetails.provenienza) ';
+      sql:=sql+Format(' where docmaster.codiceAgente=''%s'' and docmaster.numeroDoc=%d and docmaster.datadoc=''%s'' and docmaster.provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+      sql:=sql+'group by docmaster.codiceAgente,docmaster.numeroDoc,docmaster.dataDoc, docmaster.provenienza, docmaster.codiceCliente,docmaster.codiceDestinazione, docmaster.Linea ';
+      db.AddToExport(gToPC_export_baseDir+'\'+fRname,gToPC_export_defsDir+'\docMaster.def',sql,'MasterDoc',params,true,ieftAutomatic);
+
+      //Righe di reso SKU (in append)
+      sql:='select ''02'' as TR, "" as catPosizione, mid(CodiceArticolo,1,length(trim(CodiceArticolo))-(length(trim(row))+length(trim(col)))) as Modello, Col, Row, ';
+      sql:=sql+'lpad(trim(QuantitaOrd_1),8,"0") as QuantitaOrd_1, Nota, "" as CodiceArticoloPadreAlternativo ';
+      sql:=sql+Format('from docdetails where QuantitaOrd_1>0 and codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+      db.AddToExport(gToPC_export_baseDir+'\'+fRname,gToPC_export_defsDir+'\docDetails.def',sql,'ResiSKU',params,false,ieftAutomatic);
+
+      //Start export...
+      esito_export:=db.StartExport();
+      //esporto note
+      esito_export:=esito_export AND ExportDocNotes(db,gToPC_export_baseDir+'\'+fRname,CodiceAgente,numeroDocumento,provenienza,DataDocumento,false);
+
+      if(esito_export) then begin
+        //Imposto come elaborato
+    	  sql:=Format('update docmaster set NumerodocSede="%s", docmaster_exported_=3 where codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" ',[progWeb, codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    	  db.executeSql(sql);
+
+        linguaAge:=GetLinguaAgente(db, codiceAgente);
+        if(linguaAge='IT') then begin
+          //italiano
+          subj:=Format('%s - Autorizzazione al reso %s ',[CodiceAgente,fRname]);
+        end else begin
+          //default=inglese
+          subj:=Format('%s - Return authorization %s ',[CodiceAgente,fRname]);
+        end;
+
+        //copio file su Sap
+        esito_export:=CopyFile(gToPC_export_baseDir+'\'+fRname, gToPC_export_baseDir2+'\'+fRname, true);
+
+        //Invio mail al customer
+        email:=GetEmailCSResoRep(db, codiceAgente);
+        SendResoConfermationMail(db,codiceAgente,email,inttostr(numeroDocumento),dataDocumento,provenienza,subj, true, '', false);
+
+        //Invio mail all'agente
+        email:=GetEmaiAgente(db, codiceAgente);
+        SendResoConfermationMail(db,codiceAgente,email,inttostr(numeroDocumento),dataDocumento,provenienza,subj, true, '', false);
+
+      end;
+    end;
+
+
+
+    qryDocMaster.next;
+  end;
+  qryDocMaster.close;
+
+
+  //ESPORTAZIONE ORIDNI IPAD
+  qryDocMaster.sql.text:='select * from docMaster where docMaster_exported_=2 and Linea<>"INV" and (provenienza=0 or provenienza>=10) ORDER BY dataconsegna ASC ';
+
+  //per ogni riga di docmaster da esportare
+  qryDocMaster.open;
+  esito_export:=true;
+  while not qryDocMaster.eof do
+  begin
+    codiceAgente:=trim(qryDocMaster.FieldByName('codiceAgente').asString);
+    numeroDocumento:=qryDocMaster.FieldByName('NumeroDoc').asinteger;
+    dataDocumento:=trim(qryDocMaster.FieldByName('DataDoc').asString);
+    provenienza:=trim(qryDocMaster.FieldByName('provenienza').asString);
+    codiceCliente:=trim(qryDocMaster.FieldByName('codicecliente').asString);
+    codiceDestinazione:=trim(qryDocMaster.FieldByName('codiceDestinazione').asString);
+    linea:=trim(qryDocMaster.FieldByName('Linea').asString);
+    flagConsAnt:=Mid(qryDocMaster.FieldByName('customParam3').asString,1,1);
+    tipoConvention:=trim(qryDocMaster.FieldByName('tipoDoc').asString);
+    esito_export:=true;
+
+    //Federico 20171002: Transcodifica nuemro iPad to Gestionale
+    di.docNumber := numeroDocumento;
+    di.prov := trim(provenienza);
+    di.dateDoc := trim(dataDocumento);
+    di.agentCode := trim(codiceAgente);
+    di.codiceCliente := trim(codiceCliente);
+    di.codiceDestinazione := trim(codiceDestinazione);
+    di.linea := trim(linea);
+    di.realAgentCode := '';
+    di.infotype := 'V';
+    di.gestionaleDocNum := -1;
+
+    //Verifico presenta promozioni in customparam e docnotes
+    codicePromo:=''
+    //sql:='SELECT mid(trim(notaOrdine),1,6) as codPromo FROM docnotes WHERE (notaOrdine LIKE "GU14VE%" OR notaOrdine LIKE "14CI24%" OR notaOrdine LIKE "14CI25%" OR notaOrdine LIKE "14JCRS%" OR notaOrdine LIKE "14DLA1%" OR notaOrdine LIKE "14DLA2%" OR notaOrdine LIKE "14DLN1%" OR notaOrdine LIKE "14DLN2%" OR notaOrdine LIKE "14OPCL%" ) AND numeroDoc='+inttostr(numerodocumento)+' AND datadoc="'+datadocumento+'" AND codiceAgente="'+codiceAgente+'" AND provenienza="'+provenienza+'"';
+    //20160407 - prendo la promo da customParam (oppure dalle note per retrocompatibilita)
+    sql:='SELECT CustomParam AS codPromo FROM docmaster WHERE CustomParam<>"" AND numeroDoc='+inttostr(numerodocumento)+' AND datadoc="'+datadocumento+'" AND codiceAgente="'+codiceAgente+'" AND provenienza="'+provenienza+'"';
+    sql:=sql+'UNION SELECT MID(TRIM(notaOrdine),1,6) AS codPromo FROM docnotes JOIN promo_code ON(docnotes.notaOrdine LIKE CONCAT(promo_code.CodicePromo,"%")) WHERE promo_code.CodicePromo<>"" AND numeroDoc='+inttostr(numerodocumento)+' AND datadoc="'+datadocumento+'" AND codiceAgente="'+codiceAgente+'" AND provenienza="'+provenienza+'"';
+    qry.sql.text:=sql;
+    qry.open;
+    if not qry.eof then codicePromo:=trim(qry.FieldByName('codPromo').asString);
+    qry.sql.clear;
+    qry.close;
+
+    //Verifico se l'ordine contiene righe (se NON è un ordine di soli resi)
+    is_ordine_vendita:=true;
+    sql := Format('SELECT SUM(coalesce(QuantitaOrd_1,0) + coalesce(QuantitaOrd_2,0)) as tot from docdetails where codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    qry.sql.text:=sql;
+    qry.open;
+    if not qry.eof then is_ordine_vendita:=qry.FieldByName('tot').asInteger > 0;
+    qry.sql.clear;
+    qry.close;
+
+
+    //normalizzo flagConsAnt come da specifiche sap (0=Consegna anticipata; 1=non anticipata)
+    if(flagConsAnt='0') then begin
+      flagConsAnt:='1';
+    end else begin
+      flagConsAnt:='0';
+    end;
+
+
+    fOutFName:='';
+    exported_files.clear; //contiene i nomi dei files generati (che verranno copiati se tutto ok nella cartella sap)
+    if(is_ordine_vendita) then begin
+
+      //verifico quante sono le date di consegna su riga (split ordine)
+      alfabeto_idx:=1;
+
+      //preparo query per ottenere l'elenco delle date di consegna distinte
+      sql:= Format('SELECT DISTINCT dataConsegna_1 as datacons FROM docdetails where dataConsegna_1<>"" and codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" and QuantitaOrd_1 > 0 ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+      sql:=sql+' UNION ';
+      sql:=sql+Format('SELECT DISTINCT dataConsegna_2 as datacons FROM docdetails where dataConsegna_2<>"" and codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" and QuantitaOrd_2 > 0 ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+
+      //conto le date di consegna distinte per vedere se dovrò splittare l'ordine oppure no
+      qrydatecons.sql.text:=Format('select count(*) as nDate from (%s) as tmp ',[sql]);
+      qrydatecons.open;
+      if not qrydatecons.eof then begin
+        if(qrydatecons.FieldByName('nDate').asInteger = 1) then alfabeto_idx:=27; //imposto alfabeto_idx in modo che usi lo spazio come carattere da aggiungere al nome file
+      end;
+      qrydatecons.close;
+
+      //eseguo query per ciclare date di consegna
+      qrydatecons.sql.text:=sql;
+      qrydatecons.open;
+      while not qrydatecons.eof do begin
+        //esporto ordine con dataconsegna corrente
+        datacons:=qrydatecons.FieldByName('datacons').asString;
+
+        //Federico 20171002: Transcodifica nuemro iPad to Gestionale
+        di.realAgentCode := getRealAgentCode(db,di);
+        di.gestionaleDocNum := transcodificaNumDocMasterToNumDocGestionale(db,di)
+        //Federico 20171002: End
+
+        fOutFName:=codiceAgente + '-' + IntToStr(di.gestionaleDocNum) + Trim(Mid(alfabeto,alfabeto_idx,1)) + '.txt';
+
+        //se subagente, gestisco il nome del file antecedendo la provenienza
+        if(StrPadLeft(provenienza,2,'0')>='10')then fOutFName:=codiceAgente + '-' + StrPadLeft(provenienza,2,'0') +StrPadLeft(IntToStr(di.gestionaleDocNum),4,'0') +  Trim(Mid(alfabeto,alfabeto_idx,1)) + '.txt';
+
+        //memorizzo file per la copia su cartella sap
+        exported_files.append(fOutFName);
+
+        //esporto testata
+        sql:='select "01" as TR, ';
+        sql:=sql+'IF(LENGTH(TRIM(docmaster.CodiceDestinazione))<=4,CONCAT(TRIM(docmaster.CodiceCliente),TRIM(docmaster.CodiceDestinazione)),IF(TRIM(docmaster.CodiceDestinazione)<> "",docmaster.CodiceDestinazione,docmaster.CodiceCliente)) AS CodiceDestinazione, ';
+        sql:=sql+'"'+GetCodiceAgente(db,codiceAgente,inttostr(numerodocumento),dataDocumento,provenienza)+'" as CodiceAgente,docmaster.DataDoc,"'+datacons+'" as dataConsegna, if((left(CodiceCliente,2)="99" or (LEFT(CodiceDestinazione,2)="99")),"00S","00N") as ALTRO, if(Mid(Linea,1,1)="_","S","C") as TipoLinea, if(sum(docdetails.quantitaOrd_1)>3,1,0) as flagNumPezzi, SUM(docdetails.quantitaOrd_1) AS numeroPezzi, "'+flagConsAnt+'" as flagConsegnaAnticipata, "'+tipoConvention+'" as TipoDoc, "'+codicePromo+'" as CodicePromo,  ';
+        sql:=sql+'"" AS B2BNonSapiamo, CASE WHEN Customparam5 = 0 THEN "0" WHEN Customparam5 = 1 AND Customparam6 = 1 THEN "2" WHEN Customparam5 = 1 AND (Customparam6 = 0 or Customparam6 = "") THEN "1" ELSE "" END AS CheckCore ';
+        sql:=sql+'from docMaster join docdetails on (docmaster.codiceAgente=docdetails.codiceAgente and docmaster.numeroDoc=docdetails.numeroDoc and docmaster.dataDoc=docdetails.dataDoc and docmaster.provenienza=docdetails.provenienza) ';
+        sql:=sql+Format(' where docmaster.codiceAgente=''%s'' and docmaster.numeroDoc=%d and docmaster.datadoc=''%s'' and docmaster.provenienza=''%s'' and (docdetails.dataconsegna_1="%s" or docdetails.dataconsegna_2="%s") ',[codiceAgente,numeroDocumento,dataDocumento,provenienza,datacons,datacons]);
+        sql:=sql+'group by docmaster.codiceAgente,docmaster.numeroDoc,docmaster.dataDoc, docmaster.provenienza, docmaster.codiceCliente,docmaster.codiceDestinazione, docmaster.Linea ';
+        db.AddToExport(gToPC_export_baseDir+'\'+fOutFName,gToPC_export_defsDir+'\docMaster.def',sql,'MasterDoc',params,true,ieftAutomatic);
+
+        //esporto details (vendita) 19/04/2018 modificato export per prodotti alternativi msorgato
+        {sql:='select ''02'' as TR, "V" as catPosizione, mid(CodiceArticolo,1,length(trim(CodiceArticolo))-(length(trim(row))+length(trim(col)))) as Modello, Col, Row, lpad(QuantitaOrd_1,8,''0'') as QuantitaOrd_1, Nota ';
+        sql:=sql+Format('from docdetails where QuantitaOrd_1>0 and codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' and (docdetails.dataconsegna_1="%s" or docdetails.dataconsegna_2="%s") ',[codiceAgente,numeroDocumento,dataDocumento,provenienza,datacons,datacons]);
+        db.AddToExport(gToPC_export_baseDir+'\'+fOutFName,gToPC_export_defsDir+'\docDetails.def',sql,'dettaglioDocV',params,false,ieftAutomatic);
+        esito_export:=esito_export AND db.StartExport();}
+        //esporto details (vendita)
+        sql:='select ';
+        	sql:=sql+'"02" as TR, ';
+        	sql:=sql+'"V" as catPosizione, ';
+        	sql:=sql+'mid(dd.CodiceArticolo,1,length(trim(dd.CodiceArticolo))-(length(trim(row))+length(trim(dd.col)))) as Modello, ';
+        	sql:=sql+'Col, ';
+        	sql:=sql+'Row, lpad(QuantitaOrd_1,8,"0") as QuantitaOrd_1, ';
+        	sql:=sql+'Nota, ';
+          sql:=sql+'if (CodiceArticoloPadreAlternativo is null or CodiceArticoloPadreAlternativo = "", "", Coalesce( ';
+        		sql:=sql+'CONCAT(tp.modello,"@",tp.dimensione1,tp.dimensione2), ';
+        		sql:=sql+'CONCAT(LEFT(TRIM(CodiceArticoloPadreAlternativo), LENGTH(TRIM(CodiceArticoloPadreAlternativo)) - 5), "@", SUBSTRING(TRIM(CodiceArticoloPadreAlternativo), -5 ,5)) ';
+        		sql:=sql+')) AS CodiceArticoloPadreAlternativo ';
+        sql:=sql+'from docdetails as dd ';
+        sql:=sql+Format('LEFT JOIN (select * From tmp_prodotti where tmp_prodotti.organizzazionecommerciale = "%s" group by tmp_prodotti.codicearticolo) as tp ON (tp.CodiceArticolo = CodiceArticoloPadreAlternativo) ', [GetOrgCommAge(db,codiceAgente)]);
+        //sql:=sql+Format('where QuantitaOrd_1>0 and codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" and (dd.dataconsegna_1="%s" or dd.dataconsegna_2="%s") ', [codiceAgente,numeroDocumento,dataDocumento,provenienza,datacons,datacons]);
+        sql:=sql+Format('where QuantitaOrd_1>0 and codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" and (dd.dataconsegna_1="%s") ', [codiceAgente,numeroDocumento,dataDocumento,provenienza,datacons,datacons]);
+        db.AddToExport(gToPC_export_baseDir+'\'+fOutFName,gToPC_export_defsDir+'\docDetails.def',sql,'dettaglioDocV',params,false,ieftAutomatic);
+        esito_export:=esito_export AND db.StartExport();
+
+        //esporto details (omaggio)
+        sql:='select ''02'' as TR, "O" as catPosizione, mid(CodiceArticolo,1,length(trim(CodiceArticolo))-(length(trim(row))+length(trim(col)))) as Modello, Col, Row, lpad(Trim(QuantitaOrd_2),8,''0'') as QuantitaOrd_1, Nota, "" as CodiceArticoloPadreAlternativo ';
+        //sql:=sql+Format('from docdetails where QuantitaOrd_2>0 and codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' and (docdetails.dataconsegna_1="%s" or docdetails.dataconsegna_2="%s") ',[codiceAgente,numeroDocumento,dataDocumento,provenienza,datacons,datacons]);
+        sql:=sql+Format('from docdetails where QuantitaOrd_2>0 and codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' and (docdetails.dataconsegna_2="%s") ',[codiceAgente,numeroDocumento,dataDocumento,provenienza,datacons,datacons]);
+        db.AddToExport(gToPC_export_baseDir+'\'+fOutFName,gToPC_export_defsDir+'\docDetails.def',sql,'dettaglioDocO',params,false,ieftAutomatic);
+        esito_export:=esito_export AND db.StartExport();
+
+        //esporto note
+        esito_export:=esito_export AND ExportDocNotes(db,gToPC_export_baseDir+'\'+fOutFName,CodiceAgente,numeroDocumento,provenienza,DataDocumento,false);
+
+        //esporto eventuale riga 04 (nuovo cliente)
+        esito_export:=esito_export AND ExportDocNewCli(db,gToPC_export_baseDir+'\'+fOutFName,codiceAgente,numeroDocumento,dataDocumento,provenienza);
+
+
+        alfabeto_idx:=alfabeto_idx+1;
+        qrydatecons.next;
+      end;
+      qrydatecons.close;
+
+    end;  //fine is_ordine_vendita
+
+
+
+    //Verifico se esistono documenti di reso
+    sql:='select codiceReso from docresi ';
+    sql:=sql+Format(' where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    qryResi.sql.add(sql);
+    qryResi.open;
+    codiceReso:='';
+    trovati_resi:=false;
+    if(not qryResi.eof)then
+    begin
+      trovati_resi:=true;
+      codiceReso:=trim(qryResi.FieldByName('CodiceReso').asString);
+    end;
+    trovati_resi:=not qryResi.eof;
+    qryResi.sql.Clear;
+    qryResi.close;
+
+    //Verifico se il reso trovato contiene realmente qtaRese (es. creato reso e poi modificato eliminando le righe rese)
+    if(trovati_resi) then begin
+      trovati_resi:=false;  //lo rimetto a true se trovo almeno una qta>0
+      tot_qta_rese:=0;
+      sql:='SELECT ';
+      sql:=sql+' (SELECT SUM(PezziResi) FROM docresi WHERE numeroDoc='+inttostr(numeroDocumento)+' AND datadoc="'+dataDocumento+'" AND codiceAgente="'+codiceAgente+'" AND provenienza="'+provenienza+'") AS PzGen, ';
+      sql:=sql+' (SELECT SUM(QuantitaOrd_3) FROM docdetails WHERE numeroDoc='+inttostr(numeroDocumento)+' AND datadoc="'+dataDocumento+'" AND codiceAgente="'+codiceAgente+'" AND provenienza="'+provenienza+'") AS PzSku ';
+      qryResi.sql.text:=sql;
+      qryResi.open;
+      if not qryResi.Eof then begin
+        tot_qta_rese:=tot_qta_rese + qryResi.FieldByName('PzGen').asinteger;
+        tot_qta_rese:=tot_qta_rese + qryResi.FieldByName('PzSku').asinteger;
+        //if (qryResi.FieldByName('PzGen').asinteger > 0) then trovati_resi:=true;
+        //if (qryResi.FieldByName('PzSku').asinteger > 0) then trovati_resi:=true;
+        trovati_resi:=tot_qta_rese > 0;
+
+      end;
+      qryResi.sql.Clear;
+      qryResi.close;
+    end;
+
+
+    fRname:='';
+    if(trovati_resi)then
+    begin
+      //Esporto ordine con i resi per articolo fittizio
+      fRname:=codiceAgente+'R'+codiceReso+'.txt';
+
+      //se subagente, gestisco il nome del file antecedendo la provenienza
+      if(StrPadLeft(provenienza,2,'0')>='10')then fRname:=codiceAgente+'R'+ StrPadLeft(provenienza,2,'0') + StrPadLeft(trim(codiceReso),4,'0') + '.txt';
+
+      //testata...
+      sql:='select "01" as TR, ';
+      sql:=sql+'IF(LENGTH(TRIM(docmaster.CodiceDestinazione))<=4,CONCAT(TRIM(docmaster.CodiceCliente),TRIM(docmaster.CodiceDestinazione)),IF(TRIM(docmaster.CodiceDestinazione)<> "",docmaster.CodiceDestinazione,docmaster.CodiceCliente)) AS CodiceDestinazione, ';
+      sql:=sql+'"'+GetCodiceAgente(db,codiceAgente,inttostr(numerodocumento),dataDocumento,provenienza)+'" as CodiceAgente,docmaster.DataDoc,min(DataConsegna) as dataConsegna, if((left(CodiceCliente,2)="99" or (LEFT(CodiceDestinazione,2)="99")),"00S","00N") as ALTRO, "R" as TipoLinea, if(sum(docdetails.quantitaOrd_1)>3,1,0) as flagNumPezzi, '+inttostr(tot_qta_rese)+' AS numeroPezzi, 0 as flagConsegnaAnticipata, "" as TipoDoc, "'+codicePromo+'" as CodicePromo, "" AS B2BNonSapiamo, "" AS CheckCore ';
+      sql:=sql+'from docMaster left join docdetails on (docmaster.codiceAgente=docdetails.codiceAgente and docmaster.numeroDoc=docdetails.numeroDoc and docmaster.dataDoc=docdetails.dataDoc and docmaster.provenienza=docdetails.provenienza) ';
+      sql:=sql+Format(' where docmaster.codiceAgente=''%s'' and docmaster.numeroDoc=%d and docmaster.datadoc=''%s'' and docmaster.provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+      sql:=sql+'group by docmaster.codiceAgente,docmaster.numeroDoc,docmaster.dataDoc, docmaster.provenienza, docmaster.codiceCliente,docmaster.codiceDestinazione, docmaster.Linea ';
+      db.AddToExport(gToPC_export_baseDir+'\'+fRname,gToPC_export_defsDir+'\docMaster.def',sql,'MasterDoc',params,true,ieftAutomatic);
+
+      //Righe fittizie....
+      sql:='select ''02'' as TR, "" as catPosizione, ';
+      sql:=sql+'IF(MID(codiceAgente,1,1)="I",CONCAT("ARTFITTR",TRIM(linea)),CONCAT("99RET",TRIM(linea))) AS Modello, ';
+      sql:=sql+'"" as Col, "" as Row, lpad(PezziResi,8,''0'') as QuantitaOrd_1, "" as Nota, "" as CodiceArticoloPadreAlternativo ';
+      sql:=sql+Format('from docresi where PezziResi>0 and codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+      db.AddToExport(gToPC_export_baseDir+'\'+fRname,gToPC_export_defsDir+'\docDetails.def',sql,'ResiModello',params,false,ieftAutomatic);
+      //esito_export:=esito_export AND db.StartExport();
+
+      //Righe di reso SKU (in append)
+      sql:='select ''02'' as TR, "" as catPosizione, mid(CodiceArticolo,2,length(trim(CodiceArticolo))-(length(trim(row))+length(trim(col))+1)) as Modello, Col, Row, lpad(trim(QuantitaOrd_3),8,''0'') as QuantitaOrd_1, Nota, "" as CodiceArticoloPadreAlternativo ';
+      sql:=sql+Format('from docdetails where QuantitaOrd_3>0 and codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+      db.AddToExport(gToPC_export_baseDir+'\'+fRname,gToPC_export_defsDir+'\docDetails.def',sql,'ResiSKU',params,false,ieftAutomatic);
+
+      //Start export...
+      esito_export:=esito_export AND db.StartExport();
+
+      //esporto note
+      esito_export:=esito_export AND ExportDocNotes(db,gToPC_export_baseDir+'\'+fRname,CodiceAgente,numeroDocumento,provenienza,DataDocumento,true);
+      //esporto eventuale riga 04 (nuovo cliente)
+      esito_export:=esito_export AND ExportDocNewCli(db,gToPC_export_baseDir+'\'+fRname,codiceAgente,numeroDocumento,dataDocumento,provenienza);
+    end;
+
+    //Se esportazione ok, copio file su cartella di export verso sap
+    esito_ftp:=false;
+    if(esito_export)then begin
+      ForceDirectories(gToPC_export_baseDir2);
+
+      //Copio file ordini di vendita....
+      if(is_ordine_vendita) then begin
+        for file_index:=0 to exported_files.count - 1 do begin
+          fOutFName:=exported_files[file_index];
+          DeleteFile(gToPC_export_baseDir2+'\'+fOutFName);
+          esito_export:=CopyFile(gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName, true);
+          if(esito_export) and(FileExists(gToPC_export_baseDir2+'\'+fOutFName))then begin
+            AddToOutput(Format('Copia OK da "%s" a "%s". il file è presente sulla destinazione', [gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName]),false,2,33);
+            AddToLog(Format('Copia OK da "%s" a "%s". il file è presente sulla destinazione', [gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName] ));
+            esito_ftp:=true;
+          end else begin
+            AddToOutput(Format('ERRORE copia file da "%s" a "%s".', [gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName]),false,2,33);
+            AddToLog(Format('ERRORE copia file da "%s" a "%s".', [gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName] ));
+          end;
+        end;
+      end;
+
+      //Copio file reso
+      if(fRname<>'') then begin
+        if(fileExists(gToPC_export_baseDir+'\'+fRname))then begin
+          DeleteFile(gToPC_export_baseDir2+'\'+fRname);
+          esito_export:=CopyFile(gToPC_export_baseDir+'\'+fRname, gToPC_export_baseDir2+'\'+fRname, true);
+
+        if(esito_export) and(FileExists(gToPC_export_baseDir2+'\'+fRname))then begin
+            AddToOutput(Format('Copia OK da "%s" a "%s". il file è presente sulla destinazione', [gToPC_export_baseDir+'\'+fRname, gToPC_export_baseDir2+'\'+fRname]),false,2,33);
+            AddToLog(Format('Copia OK da "%s" a "%s". il file è presente sulla destinazione', [gToPC_export_baseDir+'\'+fRname, gToPC_export_baseDir2+'\'+fRname] ));
+            esito_ftp:=true;
+        end else begin
+            AddToOutput(Format('ERRORE copia file da "%s" a "%s".', [gToPC_export_baseDir+'\'+fRname, gToPC_export_baseDir2+'\'+fRname]),false,2,33);
+            AddToLog(Format('ERRORE copia file da "%s" a "%s".', [gToPC_export_baseDir+'\'+fRname, gToPC_export_baseDir2+'\'+fRname] ));
+          end;
+        end;
+      end;
+    end;
+
+    if ((is_ordine_vendita=false) and (trovati_resi=false)) then esito_ftp:=true;
+
+  	if(esito_ftp) then
+    begin
+      //Se invio ftp ok..
+
+  	  //Imposto come elaborato
+      if di.gestionaleDocNum = -1 then
+        gestionaleDocNum := '0'
+      else
+        gestionaleDocNum := inttostr(di.gestionaleDocNum);
+
+  	  sql:=Format('update docmaster set NumeroDocSede="%s", outFileName="%s", outFileName2="%s", CodiceAgenteRealeOrdine="%s", docmaster_exported_=3 where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[gestionaleDocNum,fOutFName,fOutFNameB,di.realAgentCode,codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+  	  db.executeSql(sql);
+  	  sql:=Format('update docdetails set docdetails_exported_=3 where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+  	  db.executeSql(sql);
+  	  sql:=Format('update docnotes set docnotes_exported_=3 where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+  	  db.executeSql(sql);
+
+      //Copio su backup Fax
+      ForceDirectories(gToPC_fax_dir+'\BackupFax\');
+      CopyFile(gToPC_export_baseDir+'\'+fOutFName,gToPC_fax_dir+'\BackupFax\'+fOutFName,true);
+
+      //Invio mail (se mail disponibile e nota ordine contiene fax/mail
+      SendFaxOrMail(db,gToPC_export_baseDir+'\'+fOutFName,fOutFName,codiceAgente,numeroDocumento,dataDocumento,provenienza,codiceCliente,codiceDestinazione);
+	  end;
+
+
+    qryDocMaster.Next;
+  end;
+  qryDocMaster.Close;
+
+  //ESPORTO ORDINI WEB
+  //seleziono le righe di docmaster
+  qryDocMaster.sql.clear;
+  qryDocMaster.sql.add('select * from docMaster where docMaster_exported_=2 and provenienza=1 order by dataconsegna, numeroDocSede, codiceAgente, tipologiaOrdine, numeroDoc ');
+
+  //per ogni riga di docmaster da esportare
+  qryDocMaster.open;
+  esito_export:=true;
+  oldProgWeb:='-1';
+  oldProgWebRic:='-1';
+  oldCodAge:='';
+  oldTipoOrd:=''
+  sub_index:=Ord('a')-1;
+  expNoteRicambi:=false;
+
+  while not qryDocMaster.eof do
+  begin
+    codiceAgente:=trim(qryDocMaster.FieldByName('codiceAgente').asString);
+    numeroDocumento:=qryDocMaster.FieldByName('NumeroDoc').asinteger;
+    numeroDocumentoSede:=qryDocMaster.FieldByName('NumeroDocSede').asString;
+    progWeb:=qryDocMaster.FieldByName('NumeroDocSede').asString;
+    dataDocumento:=trim(qryDocMaster.FieldByName('DataDoc').asString);
+    provenienza:=trim(qryDocMaster.FieldByName('provenienza').asString);
+    codiceCliente:=trim(qryDocMaster.FieldByName('codicecliente').asString);
+    codiceDestinazione:=trim(qryDocMaster.FieldByName('codiceDestinazione').asString);
+    tipoOrdine:=trim(qryDocMaster.FieldByName('tipologiaOrdine').asString);
+    codicePredoc:=Trim(qryDocMaster.FieldByName('CodicePredocL1').asString);
+    codAgeExport:=codiceAgente;
+    expNoteRicambi:=false;   //indice se le note dei ricambi devono essere esportate
+    codiceReso:=trim(qryDocMaster.FieldByName('NotaDocDefault').asString);  //questo campo !=blank solo per tipi ordine web = z
+    fName4U:='stat4U.csv';
+
+    //--------------------------------------
+    //Tipologia ordine
+    //--------------------------------------
+    // V o BLANK --> Vendita
+    // S --> Ricambio
+    // P --> Speciale
+    // D --> Reso di art. speciale
+    //--------------------------------------
+
+
+    //Se è un ordine di ricambio (SpareParts), imposto nome file com I00sXXX per italia, F00sXXX per francia, ..., con XXX= prowWeb
+    if(tipoOrdine='S')then begin
+
+      //NB: ordini diversi potrebbero avere lo stesso nome (fa chiave solo il progWeb)
+      //    è importante quindi che l'esportazione avvenga in append e non in replace
+      fOutFName:=mid(codiceAgente,1,1)+'00s'+ProgWeb+'.txt';
+      codAgeExport:=mid(codiceAgente,1,1)+'00';   //es. I00 per IA01, F00 per FA01, ...
+
+      //2015.04.28 - per la org comm EA01, uso il codice E99
+      orgCommAge:=GetOrgCommAge(db,codiceAgente);
+      if(orgCommAge='EA01') then fOutFName:=mid(codiceAgente,1,1)+'99s'+ProgWeb+'.txt';
+      if(orgCommAge='EA01') then codAgeExport:='E99';
+
+      //2015.04.29 - eccezioni per altre org.comm.
+      if(orgCommAge='DKA1') then fOutFName:='DK0s'+ProgWeb+'.txt';
+      if(orgCommAge='DKA1') then codAgeExport:='DK0';
+      if(orgCommAge='FIA1') then fOutFName:='FI0s'+ProgWeb+'.txt';
+      if(orgCommAge='FIA1') then codAgeExport:='FI0';
+      if(orgCommAge='NOA1') then fOutFName:='NO0s'+ProgWeb+'.txt';
+      if(orgCommAge='NOA1') then codAgeExport:='NO0';
+      if(orgCommAge='SEA1') then fOutFName:='SE0s'+ProgWeb+'.txt';
+      if(orgCommAge='SEA1') then codAgeExport:='SE0';
+      if(orgCommAge='IA04') then codAgeExport:='IS0';
+      if(orgCommAge='IA04') then fOutFName:='IS0'+ProgWeb+'.txt';
+
+      //2017.01.24 - altre eccezioni
+      if(orgCommAge='DA01') then codAgeExport:='D99';
+      if(orgCommAge='DA01') then fOutFName:='D99s'+ProgWeb+'.txt';
+      if(orgCommAge='SA01') then codAgeExport:='S99';
+      if(orgCommAge='SA01') then fOutFName:='S99s'+ProgWeb+'.txt';
+
+
+
+      //Al primo cambio di ProgWeb, elimino file destinazione (evita append se il file era già stato creato precedentemente)
+      if(Trim(oldProgWebRic)<>Trim(progWeb))then begin
+        DeleteFile(gToPC_export_baseDir+'\'+fOutFName);
+        expNoteRicambi:=true;   //solo la prima volta in quanto docnotes per ordini con lo stesso progWeb è identica
+        oldProgWebRic:=progWeb;
+      end;
+    end else begin
+
+      //gesrtisco lettera sul nome sap.
+      //al cambio di codiceagente e/o tipologiaOrdine, resetto lettera associata
+      //server per gestire ordini di linne diverse per lo stesso agente nel caso di vendita/speciali/resi
+
+      //reset se cambia prog. web
+      if(Trim(oldProgWeb)<>Trim(progWeb))then
+      begin
+        sub_index:=Ord('a')-1;
+        oldProgWeb:=progWeb;
+      end;
+      //reset se cambia codice agente...
+      if(Trim(oldCodAge)<>Trim(codiceAgente))then
+      begin
+        sub_index:=Ord('a')-1;
+        oldCodAge:=codiceAgente;
+      end;
+      //reset se cambia tipologia ordine...
+      if(Trim(oldTipoOrd)<>Trim(tipoOrdine))then
+      begin
+        sub_index:=Ord('a')-1;
+        oldTipoOrd:=tipoOrdine;
+      end;
+
+      //passo a lettera successiva
+      sub_index:=sub_index+1;
+      lettera:=chr(sub_index);
+
+      //Imposto il nome del file su sap (in base al tipo di ordine)
+
+      //default per la vendita    (W)
+      fOutFName:=codiceAgente+'w'+ProgWeb+lettera+'.txt';
+
+      //ordine speciale...  (P)
+      if(tipoOrdine='P') then fOutFName:=codiceAgente+'p'+ProgWeb+lettera+'.txt';
+
+      //reso di ordine speciale (D)
+      if(tipoOrdine='D') then fOutFName:=codiceAgente+'d'+codiceReso+lettera+'.txt';
+    end;
+
+
+    esito_export:=true;
+
+    //esporto master (solo se il file destinazione non esiste ancora; in questo modo non esporto due testate per ordini di racmbi)
+    if(tipoOrdine<>'S') or (expNoteRicambi=true) then begin
+      sql:='select "01" as TR, ';
+      sql:=sql+'IF(LENGTH(TRIM(docmaster.CodiceDestinazione))<=4,CONCAT(TRIM(docmaster.CodiceCliente),TRIM(docmaster.CodiceDestinazione)),IF(TRIM(docmaster.CodiceDestinazione)<> "",docmaster.CodiceDestinazione,docmaster.CodiceCliente)) AS CodiceDestinazione, ';
+      sql:=sql+'"'+codAgeExport+'" as codiceAgente,docmaster.DataDoc,min(DataConsegna) as dataConsegna, if((left(CodiceCliente,2)="99" or (LEFT(CodiceDestinazione,2)="99")),"00S","00N") as ALTRO, if(Mid(Linea,1,1)="_","S","C") as TipoLinea, if(sum(docdetails.quantitaOrd_1)>3,1,0) as flagNumPezzi, SUM(docdetails.quantitaOrd_1) AS numeroPezzi, 0 as flagConsegnaAnticipata, "" as TipoDoc, "" as CodicePromo,  ';
+      sql:=sql+'"" AS B2BNonSapiamo, CASE WHEN Customparam5 = 0 THEN "0" WHEN Customparam5 = 1 AND Customparam6 = 1 THEN "2" WHEN Customparam5 = 1 AND (Customparam6 = 0 or Customparam6 = "") THEN "1" ELSE "" END AS CheckCore ';
+      sql:=sql+'from docMaster join docdetails on (docmaster.codiceAgente=docdetails.codiceAgente and docmaster.numeroDoc=docdetails.numeroDoc and docmaster.dataDoc=docdetails.dataDoc and docmaster.provenienza=docdetails.provenienza) ';
+      sql:=sql+Format(' where docmaster.codiceAgente=''%s'' and docmaster.numeroDoc=%d and docmaster.datadoc=''%s'' and docmaster.provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+      sql:=sql+'group by docmaster.codiceAgente,docmaster.numeroDoc,docmaster.dataDoc, docmaster.provenienza, docmaster.codiceCliente,docmaster.codiceDestinazione, docmaster.Linea ';
+      db.AddToExport(gToPC_export_baseDir+'\'+fOutFName,gToPC_export_defsDir+'\docMaster.def',sql,'MasterDoc',params,true,ieftAutomatic);
+    end;
+
+
+    //esporto details (vendita)
+    //NB. poiché i resi web vengono messi in qtaOrd1, questa procedura va bene anche per i tipi ordini 'z' (resi speciali)
+    sql:='select ''02'' as TR, "V" as catPosizione, mid(CodiceArticolo,1,length(trim(CodiceArticolo))-(length(trim(row))+length(trim(col)))) as Modello, Col, Row, lpad(QuantitaOrd_1,8,''0'') as QuantitaOrd_1, Nota, "" as CodiceArticoloPadreAlternativo ';
+    sql:=sql+Format('from docdetails where QuantitaOrd_1>0 and codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    db.AddToExport(gToPC_export_baseDir+'\'+fOutFName,gToPC_export_defsDir+'\docDetails.def',sql,'dettaglioDoc',params,false,ieftAutomatic);
+    esito_export:=esito_export AND db.StartExport();
+    {
+    //esporto details (omaggio)
+    sql:='select ''02'' as TR, "O" as catPosizione, mid(CodiceArticolo,1,length(trim(CodiceArticolo))-(length(trim(row))+length(trim(col)))) as Modello, Col, Row, lpad(QuantitaOrd_2,8,''0'') as QuantitaOrd_1, Nota ';
+    sql:=sql+Format('from docdetails where QuantitaOrd_2>0 and codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    db.AddToExport(gToPC_export_baseDir+'\'+fOutFName,gToPC_export_defsDir+'\docDetails.def',sql,'dettaglioDoc',params,false,ieftAutomatic);
+    esito_export:=esito_export AND db.StartExport();
+    }
+
+    //esporto note
+    if(tipoOrdine<>'S') or (expNoteRicambi=true) then begin
+      esito_export:=esito_export AND ExportDocNotes(db,gToPC_export_baseDir+'\'+fOutFName,CodiceAgente,numeroDocumento,provenienza,DataDocumento,false);
+    end;
+
+    //esporto eventuale riga 04 (nuovo cliente)
+    esito_export:=esito_export AND ExportDocNewCli(db,gToPC_export_baseDir+'\'+fOutFName,codiceAgente,numeroDocumento,dataDocumento,provenienza);
+
+    //esporto statistiche su articoli 4U
+    sql:='';
+    if(tipoOrdine='D') then begin
+      //conteggio l'ordine come causale 090 -> Causale Reso
+      sql:='SELECT ";" as SEP, anagrage.OrganizzazioneCommerciale, "'+codiceCliente+'" AS CodiceCliente, CodiceArticolo, DataDoc AS DataRegistrazione, "090" AS Causale, QuantitaOrd_1 AS qta ';
+      sql:=sql+'FROM docdetails JOIN anagrage ON(docdetails.codiceAgente = anagrage.CodiceAgente) ';
+      sql:=sql+Format('WHERE QuantitaOrd_1>0 and docdetails.codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    end;
+    if(tipoOrdine='P') then begin
+      //conteggio l'ordine come causale 011 -> Causale Vendita (di ordine speciale)
+      sql:='SELECT ";" as SEP, anagrage.OrganizzazioneCommerciale, "'+codiceCliente+'" AS CodiceCliente, CodiceArticolo, DataDoc AS DataRegistrazione, "011" AS Causale, QuantitaOrd_1 AS qta ';
+      sql:=sql+'FROM docdetails JOIN anagrage ON(docdetails.codiceAgente = anagrage.CodiceAgente) ';
+      sql:=sql+Format('WHERE QuantitaOrd_1>0 and docdetails.codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    end;
+    if(sql <> '') then sql:=sql+ ' UNION ';
+    //aggiungo i record presenti in docarticolispeciali
+    sql:=sql+'SELECT ";" as SEP, anagrage.OrganizzazioneCommerciale, "'+codiceCliente+'" AS CodiceCliente, CONCAT(TRIM(codiceLivello1), TRIM(Colore), TRIM(Calibro)) AS CodiceArticolo, DataDoc AS DataRegistrazione, CodiceMotivazione AS Causale, Qta FROM docarticolispeciali ';
+    sql:=sql+'JOIN anagrage ON(docarticolispeciali.codiceAgente = anagrage.CodiceAgente) ';
+    sql:=sql+Format('WHERE docarticolispeciali.codiceAgente="%s" and numeroDoc=%d and datadoc="%s" and provenienza="%s" ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+    db.AddToExport(gToPC_export_baseDir+'\'+fName4U,gToPC_export_defsDir+'\docarticolispeciali.def',sql,'docarticolispeciali',params,false,ieftAutomatic);
+    db.StartExport();
+
+
+    //Se esportazione ok, copio file su cartella di export verso sap
+    esito_ftp:=false;
+    if(esito_export)then begin
+      ForceDirectories(gToPC_export_baseDir2);
+      DeleteFile(gToPC_export_baseDir2+'\'+fOutFName);
+      esito_export:=CopyFile(gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName, true);
+      if(esito_export) and(FileExists(gToPC_export_baseDir2+'\'+fOutFName))then begin
+        AddToOutput(Format('Copia OK da "%s" a "%s". il file è presente sulla destinazione', [gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName]),false,2,33);
+        AddToLog(Format('Copia OK da "%s" a "%s". il file è presente sulla destinazione', [gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName] ));
+        esito_ftp:=true;
+      end else begin
+        AddToOutput(Format('ERRORE copia file da "%s" a "%s".', [gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName]),false,2,33);
+        AddToLog(Format('ERRORE copia file da "%s" a "%s".', [gToPC_export_baseDir+'\'+fOutFName, gToPC_export_baseDir2+'\'+fOutFName] ));
+      end;
+    end;
+
+    {
+	  //Mi connetto ad FTP2 e pubblico li il file
+    FtpInit(true,true);
+    FtpConnect(gFtp2HostName,gFtp2UserName,gFtp2Password);
+    FtpSetMode(gFtp2PassiveMode);
+    ftpBaseDir:=gFtp2BaseDir;
+    FtpCreateDirRec(ftpBaseDir);
+    //Elimino eventuale file precedente
+    FtpDeleteFile(ftpBaseDir+fOutFName);
+    //Invio file via ftp
+    esito_ftp:=FtpPutFile(gToPC_export_baseDir+'\'+fOutFName, ftpBaseDir);
+    FtpDisconnect();
+    FtpDeInit();
+    OutputAddEmptyLine();
+    }
+
+	  if(esito_ftp) then
+    begin
+		  //Se invio a cartella di copia è ok
+
+  		//Imposto outFileName su docmaster ed exported_=3
+  		sql:=Format('update docmaster set outFileName="%s", docmaster_exported_=3 where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[fOutFName,codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+  		db.executeSql(sql);
+  		sql:=Format('update docdetails set docdetails_exported_=3 where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+  		db.executeSql(sql);
+  		sql:=Format('update docnotes set docnotes_exported_=3 where codiceAgente=''%s'' and numeroDoc=%d and datadoc=''%s'' and provenienza=''%s'' ',[codiceAgente,numeroDocumento,dataDocumento,provenienza]);
+  		db.executeSql(sql);
+
+  		//Copio su backup Fax
+  		ForceDirectories(gToPC_fax_dir+'\BackupFax\');
+  		CopyFile(gToPC_export_baseDir+'\'+fOutFName,gToPC_fax_dir+'\BackupFax\'+fOutFName,true);
+
+      if(tipoOrdine<>'D')then begin
+
+    		//INVIO MAIL SOLO AGLI AGENTI. Le altre mail vengono inviate dal web
+    		//Invio mail ai record relativi alla tabella MailOrdiniAgenti
+    		//subj:=Format('%s - Order Number: %d - Customer Code: %s',[CodiceAgente,numeroDocumento,CodiceCliente]);
+        subj:=''; //il subj viene impostato dalla funzione SendOrderConfermationMail
+    		sql:='select * from mailordiniagenti where codiceAgente="'+codiceAgente+'" ';
+    		qry.sql.clear;
+    		qry.sql.add(sql);
+    		qry.Open;
+    		while not qry.Eof do
+    		begin
+          orgCommAge:=GetOrgCommAge(db,codiceAgente)
+          descPredoc:=GetDescPredoc(db,codicePredoc);
+            //Inizializzo oggetto mail in lingua in base all'orgComm
+          if(orgCommAge='IA01') or (orgCommAge='ZI01')then begin
+            subj:=Format('%s - Ordine web numero: %s - Codice Cliente: %s - %s',[codiceAgente,numeroDocumentoSede,codiceCliente, descPredoc]);
+          end;
+          if(orgCommAge='DA01')then begin
+            subj:=Format('%s - Dokumentennummerweb: %s - Kundennummer: %s - %s',[codiceAgente,numeroDocumentoSede,codiceCliente, descPredoc]);
+          end;
+          if(orgCommAge='GA01')then begin
+            subj:=Format('%s - Order Number Web: %s - Customer Code: %s - %s',[codiceAgente,numeroDocumentoSede,codiceCliente, descPredoc]);
+          end;
+          if(orgCommAge='FA01') or (orgCommAge='ZF01')then begin
+            subj:=Format('%s - Web Document N. : %s - Code client: %s - %s',[codiceAgente,numeroDocumentoSede,codiceCliente, descPredoc]);
+          end;
+          if(orgCommAge='EA01')then begin
+            subj:=Format('%s - Web Número de documento: %s - Código cliente: %s - %s',[codiceAgente,numeroDocumentoSede,codiceCliente, descPredoc]);
+          end;
+          if(orgCommAge='PA01')then begin
+            subj:=Format('%s - WEB NUMERO DO DOCUMENTO: %s  - CODIGO DE CLIENTE: %s - %s',[codiceAgente,numeroDocumentoSede,codiceCliente, descPredoc]);
+          end;
+          //default
+          if(subj='')then begin
+            subj:=Format('%s - Order Number: %s - Customer Code: %s - %s',[codiceAgente,numeroDocumentoSede,codiceCliente, descPredoc]);
+          end;
+
+    			email:=Trim(qry.FieldByName('Mail').asString);
+          SendOrderConfermationMail(db,codiceAgente,email,inttostr(numeroDocumento),dataDocumento,provenienza,subj, true, '', true);
+    			qry.Next;
+    		end;
+    		qry.Close;
+
+      end;
+    end;
+    qryDocMaster.Next;
+  end;
+
+  //Reinvia (se necessario) eventuali mail pending
+  SendMailPending(db);
+
+  //Invio (o ritenta) l'invio dei pdf via mail (inventario)
+  SendDocsPdf(db);
+
+  qry.free;
+  qryDocMaster.Free;
+  qryResi.free;
+  qryGetNumber.free;
+  qrydatecons.free;
+end;
