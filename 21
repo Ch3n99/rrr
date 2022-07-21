@@ -958,7 +958,7 @@ end;
 
 
 //Lorenzo 2022.07.21
-function createFileCsvnewcustumers(db:TDatabase;nomeFileCsvnc:string):boolean;
+function createFileCsvnewcustumers(db:TDatabase):boolean;
  var
     qry:TZQuery;
     csv:TStringList;
@@ -1423,8 +1423,8 @@ begin
       nomeFilePdfAge:=folderPath + 'inventory_age_'+codiceInventario+'_'+codiceAgente+'_'+dataDocumento+'_'+provenienza+'.pdf'
       nomeFileCsv:=folderPath + 'inventory_csv_'+codiceInventario+'_'+codiceAgente+'_'+dataDocumento+'_'+provenienza+'.csv'
       createFileCsvInventario(db,codiceAgente,inttostr(numeroDocumento),dataDocumento,provenienza, codiceInventario, nomeFileCsv);
-//lorenzo
-       createFileCsvnewcustumers(db ,nomeFileCsvnc);
+//lorenzo 
+      createFileCsvnewcustumers(db);
       //invio pdf al controller
       AppendDocToPdf(db,codiceAgente,inttostr(numeroDocumento),dataDocumento,provenienza,GetLinguaAgente(db, codiceAgente),nomeFilePdfCtrl,GetEmailControllerRep(db,codiceAgente),'inventario', true, '');
 
