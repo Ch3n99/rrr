@@ -54,7 +54,7 @@ begin
     sql:=sql+'WHERE lineeage.CodiceLinea=dm.Linea GROUP BY agenti_clienti.CodiceAgente ';
     qry.sql.text:=sql;
     qry.open;
-    if not qry.eof then
+    if not qry.eof then 
     begin
       result:=trim(qry.FieldByName('CodiceAgenteDefinitivo').asString);
     end;
