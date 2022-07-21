@@ -54,7 +54,7 @@ begin
     sql:=sql+'WHERE lineeage.CodiceLinea=dm.Linea GROUP BY agenti_clienti.CodiceAgente ';
     qry.sql.text:=sql;
     qry.open;
-    if not qry.eof then 
+    if not qry.eof then
     begin
       result:=trim(qry.FieldByName('CodiceAgenteDefinitivo').asString);
     end;
@@ -962,7 +962,7 @@ function createFileCsvnewcustumers(db:TDatabase):boolean;
  var
     qry:TZQuery;
     csv:TStringList;
-    sql,currentRow,prec1,nomeFileCsv:string;
+    sql,currentRow,prec1,nomeFileCsvnc:string;
  begin
   result:=true;
   csv:=TStringList.create;
@@ -1066,10 +1066,10 @@ function createFileCsvnewcustumers(db:TDatabase):boolean;
       currentRow:=currentRow+EscapeCsvFieldRec(qry,'EmailFattPec');
 
      if(CompareStr(EscapeCsvFieldRec(qry,'CodiceCliente'),prec1)<>0)then
-      nomeFileCsv:='sold_to_'+EscapeCsvFieldRec(qry,'CodiceCliente')+'_'+EscapeCsvFieldRec(qry,'Data')+'.csv';
+      nomeFileCsvnc:='sold_to_'+EscapeCsvFieldRec(qry,'CodiceCliente')+'_'+EscapeCsvFieldRec(qry,'Data')+'.csv';
 
       csv.Append(currentRow);
-      csv.SaveToFile(nomeFileCsv);
+      csv.SaveToFile(nomeFileCsvnc);
       prec1:=EscapeCsvFieldRec(qry,'CodiceCliente');
       qry.next;
     end;
@@ -1423,8 +1423,8 @@ begin
       nomeFilePdfAge:=folderPath + 'inventory_age_'+codiceInventario+'_'+codiceAgente+'_'+dataDocumento+'_'+provenienza+'.pdf'
       nomeFileCsv:=folderPath + 'inventory_csv_'+codiceInventario+'_'+codiceAgente+'_'+dataDocumento+'_'+provenienza+'.csv'
       createFileCsvInventario(db,codiceAgente,inttostr(numeroDocumento),dataDocumento,provenienza, codiceInventario, nomeFileCsv);
-//lorenzo 
-      createFileCsvnewcustumers(db);
+//lorenzo
+       createFileCsvnewcustumers(db);
       //invio pdf al controller
       AppendDocToPdf(db,codiceAgente,inttostr(numeroDocumento),dataDocumento,provenienza,GetLinguaAgente(db, codiceAgente),nomeFilePdfCtrl,GetEmailControllerRep(db,codiceAgente),'inventario', true, '');
 
